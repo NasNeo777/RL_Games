@@ -28,7 +28,9 @@ MAX_VEL1 = 4 * math.pi
 MAX_VEL2 = 9 * math.pi
 
 DT = 0.05                  # 控制步长(20Hz,倒立平衡必须够快)
-TORQUES = (-2.0, -1.0, 0.0, 1.0, 2.0)
+# ±0.25 两档微调力矩是平衡的关键:只有 ±1/±2 粗档时,
+# 策略在倒立点附近只能反复过度修正,陷入小幅晃动的极限环。
+TORQUES = (-2.0, -1.0, -0.25, 0.0, 0.25, 1.0, 2.0)
 
 UPRIGHT_H = 1.9            # 倒立区:末端高度阈值(满高 2.0)
 UPRIGHT_VEL1 = 3.0         # 倒立区:第一关节角速度上限
@@ -118,6 +120,10 @@ class DoublePendulumEnv(BaseEnv):
         # 接近顶部时惩罚角速度:要减速到达,而不是高速甩过
         if h > 1.6:
             reward -= 0.005 * (dt1 * dt1 + dt2 * dt2)
+        # 顶部精度奖励:1.8 以上连续递增,晃动幅度收得越紧拿得越多。
+        # 没有这个梯度,策略学到"差不多直立"后就再无改进动力。
+        if h > 1.8:
+            reward += 2.0 * (h - 1.8) / 0.2
 
         upright = (h > UPRIGHT_H
                    and abs(dt1) < UPRIGHT_VEL1
@@ -169,6 +175,7 @@ class DoublePendulumEnv(BaseEnv):
             "type": "double_pendulum",
             "l1": L1, "l2": L2,
             "success_height": UPRIGHT_H,
+            "hold_steps": HOLD_STEPS,
             "hold_seconds": HOLD_STEPS * DT,
             "frame_dt": DT,
         }
