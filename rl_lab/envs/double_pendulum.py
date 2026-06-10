@@ -31,10 +31,14 @@ DT = 0.05                  # 控制步长(20Hz,倒立平衡必须够快)
 TORQUES = (-2.0, -1.0, 0.0, 1.0, 2.0)
 
 UPRIGHT_H = 1.9            # 倒立区:末端高度阈值(满高 2.0)
-UPRIGHT_VEL1 = 2.0         # 倒立区:第一关节角速度上限
-UPRIGHT_VEL2 = 4.0         # 倒立区:第二关节角速度上限
+UPRIGHT_VEL1 = 3.0         # 倒立区:第一关节角速度上限
+UPRIGHT_VEL2 = 5.0         # 倒立区:第二关节角速度上限
 HOLD_STEPS = 100           # 连续保持 5 秒才算成功
 SUCCESS_BONUS = 100.0      # 成功基础奖金;另按剩余时间最多再翻一倍
+
+# 课程学习:训练时一定比例的回合直接从"接近倒立"开始,
+# 让 agent 把"稳"这件事单独学会(评估永远从下垂开始,任务不变)。
+CURRICULUM_PROB = 0.3
 
 
 def _dynamics(s, tau):
@@ -79,9 +83,17 @@ class DoublePendulumEnv(BaseEnv):
         self.hold = 0
 
     def reset(self, seed=None):
+        # 评估总是传 seed,训练第一步也传一次;之后训练 reset() 不带 seed,
+        # 这时按概率切到"近倒立"起手,做课程学习。
         if seed is not None:
             self.rng = np.random.default_rng(seed)
-        self.s = self.rng.uniform(-0.1, 0.1, size=4)
+            self.s = self.rng.uniform(-0.1, 0.1, size=4)
+        elif self.rng.random() < CURRICULUM_PROB:
+            # 在完全倒立 (theta1=pi, theta2=0) 附近撒一些角度/角速度噪声
+            self.s = np.array([math.pi, 0.0, 0.0, 0.0]) \
+                + self.rng.uniform(-0.4, 0.4, size=4)
+        else:
+            self.s = self.rng.uniform(-0.1, 0.1, size=4)
         self.t = 0
         self.hold = 0
         self.frames = []
@@ -112,7 +124,9 @@ class DoublePendulumEnv(BaseEnv):
                    and abs(dt2) < UPRIGHT_VEL2)
         if upright:
             self.hold += 1
-            reward += 1.0
+            # 关键:奖励随连续保持步数线性递增,而不是恒定 +1。
+            # 这样 agent 选择"持续静止"严格优于"反复进出倒立区刷短奖"。
+            reward += 1.0 + 0.01 * self.hold
         else:
             self.hold = 0
 
