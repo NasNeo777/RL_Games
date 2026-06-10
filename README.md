@@ -4,6 +4,16 @@
 
 ## 快速开始
 
+一键同时启动训练 + 演示界面(自动打开浏览器):
+
+```bash
+./start.sh                       # 默认 PPO,练到学会为止
+./start.sh --algo dqn --forever  # 换 DQN,学会后也不停
+PORT=8888 ./start.sh --resume    # 换端口 + 断点续练
+```
+
+Ctrl+C 同时停掉两者;训练自然结束后服务器会留着供演示。也可以分开跑:
+
 ```bash
 # 训练(默认 PPO,练到评估中每次都能摆上去为止)
 .venv/bin/python -m rl_lab.train --env double_pendulum --algo ppo
