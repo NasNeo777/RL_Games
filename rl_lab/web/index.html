@@ -80,6 +80,78 @@ let state = { run: null, which: "best", demo: null, playT: 0, lastTs: 0 };
 
 /* ===== 渲染器注册表:新游戏在这里加一个 type 对应的画法 ===== */
 const RENDERERS = {
+  mountain_car(ctx, W, H, spec, frames, fIdx, frac) {
+    const a = frames[fIdx], b = frames[Math.min(fIdx + 1, frames.length - 1)];
+    const x = a.x + (b.x - a.x) * frac;
+    const v = a.v;
+    const mtnY = px => Math.sin(3 * px) * 0.45 + 0.55;   // 0~1
+    const xMin = spec.min_pos, xMax = spec.max_pos;
+    const X = px => 30 + (px - xMin) / (xMax - xMin) * (W - 60);
+    const Y = py => H - 30 - py * (H - 80);
+    ctx.clearRect(0, 0, W, H);
+    // 山体
+    ctx.fillStyle = "#1f2a36"; ctx.strokeStyle = "#4fc3f7"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(X(xMin), H);
+    for (let i = 0; i <= 120; i++) {
+      const px = xMin + (xMax - xMin) * i / 120;
+      ctx.lineTo(X(px), Y(mtnY(px)));
+    }
+    ctx.lineTo(X(xMax), H); ctx.closePath(); ctx.fill();
+    ctx.beginPath();
+    for (let i = 0; i <= 120; i++) {
+      const px = xMin + (xMax - xMin) * i / 120;
+      const xc = X(px), yc = Y(mtnY(px));
+      i ? ctx.lineTo(xc, yc) : ctx.moveTo(xc, yc);
+    }
+    ctx.stroke();
+    // 终点旗
+    const gx = X(spec.goal), gy = Y(mtnY(spec.goal));
+    ctx.strokeStyle = "#66bb6a"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(gx, gy - 40); ctx.stroke();
+    ctx.fillStyle = "#66bb6a";
+    ctx.beginPath(); ctx.moveTo(gx, gy - 40); ctx.lineTo(gx + 18, gy - 33);
+    ctx.lineTo(gx, gy - 26); ctx.closePath(); ctx.fill();
+    // 左/右极值
+    for (const [px, color, label] of [[a.xmin, "#ffb74d", "← 最左"],
+                                       [a.xmax, "#81d4fa", "最右 →"]]) {
+      ctx.strokeStyle = color + "88"; ctx.setLineDash([4, 4]);
+      const xc = X(px); ctx.beginPath();
+      ctx.moveTo(xc, Y(0)); ctx.lineTo(xc, Y(mtnY(px))); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = color; ctx.font = "11px sans-serif";
+      ctx.fillText(label, xc - 18, Y(0) + 14);
+    }
+    // 小车(法向偏移使其贴在山坡上)
+    const dy = (mtnY(x + 0.01) - mtnY(x - 0.01)) / 0.02;
+    const ang = Math.atan2(-dy * (H - 80), (W - 60) / (xMax - xMin));
+    const cx = X(x), cy = Y(mtnY(x));
+    ctx.save();
+    ctx.translate(cx, cy - 8);
+    ctx.rotate(-ang);
+    ctx.fillStyle = a.a === 0 ? "#ffb74d" : a.a === 2 ? "#81d4fa" : "#e6edf3";
+    ctx.fillRect(-14, -8, 28, 12);
+    ctx.fillStyle = "#0a0e12";
+    ctx.beginPath(); ctx.arc(-9, 6, 4, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(9, 6, 4, 0, 7); ctx.fill();
+    // 推力箭头
+    if (a.a !== 1) {
+      ctx.strokeStyle = a.a === 2 ? "#81d4fa" : "#ffb74d"; ctx.lineWidth = 2;
+      const dir = a.a === 2 ? 1 : -1;
+      ctx.beginPath(); ctx.moveTo(0, -4); ctx.lineTo(dir * 18, -4);
+      ctx.lineTo(dir * 14, -8); ctx.moveTo(dir * 18, -4);
+      ctx.lineTo(dir * 14, 0); ctx.stroke();
+    }
+    ctx.restore();
+    // 读数
+    ctx.fillStyle = "#8b98a5"; ctx.font = "12px monospace";
+    ctx.fillText(`位置 x = ${x.toFixed(3)}  速度 v = ${v.toFixed(4)}`,
+                 8, H - 10);
+    if (x >= spec.goal) {
+      ctx.fillStyle = "#66bb6a"; ctx.font = "bold 14px sans-serif";
+      ctx.fillText("● 登顶成功", 8, 22);
+    }
+  },
+
   double_pendulum(ctx, W, H, spec, frames, fIdx, frac) {
     const a = frames[fIdx], b = frames[Math.min(fIdx + 1, frames.length - 1)];
     const lerpAngle = (x, y) => {
