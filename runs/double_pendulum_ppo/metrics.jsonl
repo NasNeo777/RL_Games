@@ -3,3 +3,4 @@
 {"time": 7.3, "episode": 60, "env_steps": 26138, "train_return": -168.39, "eval_return": -399.34, "success_rate": 0.2, "best_return": -399.34, "solved": false}
 {"time": 8.6, "episode": 80, "env_steps": 30999, "train_return": -98.55, "eval_return": -106.19, "success_rate": 0.8, "best_return": -106.19, "solved": false}
 {"time": 9.4, "episode": 100, "env_steps": 34716, "train_return": -64.99, "eval_return": -17.33, "success_rate": 1.0, "best_return": -17.33, "solved": true}
+{"time": 0.9, "episode": 20, "env_steps": 4006, "train_return": -66.93, "eval_return": -0.67, "success_rate": 1.0, "best_return": -0.67, "solved": true}

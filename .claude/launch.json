@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "rl-demo-server",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["-m", "rl_lab.server", "--port", "8000"],
+      "port": 8000
+    }
+  ]
+}
