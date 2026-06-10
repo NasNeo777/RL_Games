@@ -147,6 +147,7 @@ class DoublePendulumEnv(BaseEnv):
             "tau": tau,
             "h": round(self._tip_height(), 3),
             "up": int(upright),
+            "hold": self.hold,                 # 已连续稳定的步数,前端做倒计时
         })
 
     def render_spec(self):

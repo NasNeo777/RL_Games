@@ -201,13 +201,24 @@ const RENDERERS = {
     ctx.fillStyle = "#8b98a5"; ctx.font = "12px monospace";
     ctx.fillText(`末端高度 h = ${h.toFixed(2)} / 2.00`, 8, H - 10);
     if (up) {
+      const remain = Math.max(0, (spec.hold_seconds ?? 5)
+                              - (a.hold ?? 0) * spec.frame_dt);
       ctx.fillStyle = "#66bb6a"; ctx.font = "bold 14px sans-serif";
-      ctx.fillText("● 倒立稳定中", 8, 22);
+      ctx.fillText(`● 倒立稳定中  ${remain.toFixed(1)}s`, 8, 22);
+      // 进度条:已稳定时间 / 目标时间
+      const bw = 140, bh = 6, bx = 8, by = 30;
+      ctx.fillStyle = "rgba(102,187,106,.2)";
+      ctx.fillRect(bx, by, bw, bh);
+      const frac = 1 - remain / (spec.hold_seconds ?? 5);
+      ctx.fillStyle = "#66bb6a";
+      ctx.fillRect(bx, by, bw * frac, bh);
     }
   },
 };
 
 /* ===== 演示动画 ===== */
+const HOLD_AT_SUCCESS = 2.0;   // 成功瞬间定格 + 庆祝多少秒
+
 function animate(ts) {
   requestAnimationFrame(animate);
   const d = state.demo;
@@ -218,12 +229,60 @@ function animate(ts) {
   const speed = parseFloat($("speed").value);
   state.playT += dt * speed;
   const total = d.frames.length * d.spec.frame_dt;
-  if (state.playT >= total) state.playT = 0;          // 循环播放
-  const fpos = state.playT / d.spec.frame_dt;
+  const holdEnd = total + (d.success ? HOLD_AT_SUCCESS : 0);
+  if (state.playT >= holdEnd) state.playT = 0;        // 循环播放
+  // 进入定格阶段:fpos 卡在最后一帧,celebT 计成功庆祝时间
+  let fpos, celebT = 0;
+  if (state.playT < total) {
+    fpos = state.playT / d.spec.frame_dt;
+  } else {
+    fpos = d.frames.length - 1;
+    celebT = state.playT - total;
+  }
   const fIdx = Math.min(Math.floor(fpos), d.frames.length - 1);
   const renderer = RENDERERS[d.spec.type];
   if (renderer) renderer(ctx, cv.width, cv.height, d.spec, d.frames,
-                         fIdx, fpos - fIdx);
+                         fIdx, Math.min(1, fpos - fIdx));
+  if (d.success && celebT > 0) drawCelebration(ctx, cv.width, cv.height,
+                                                d, celebT);
+}
+
+function drawCelebration(ctx, W, H, d, t) {
+  // 半透明遮罩,呼吸感
+  const a = 0.35 + 0.15 * Math.sin(t * 6);
+  ctx.fillStyle = `rgba(102,187,106,${a * 0.25})`;
+  ctx.fillRect(0, 0, W, H);
+  // 中央标题
+  const cx = W / 2, cy = H / 2;
+  const scale = 1 + 0.05 * Math.sin(t * 8);
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(scale, scale);
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.shadowColor = "rgba(102,187,106,.9)"; ctx.shadowBlur = 24;
+  ctx.fillStyle = "#66bb6a";
+  ctx.font = "bold 56px -apple-system, 'PingFang SC', sans-serif";
+  ctx.fillText("🎉 成功!", 0, -22);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = "#e6edf3";
+  ctx.font = "16px -apple-system, 'PingFang SC', sans-serif";
+  const tip = d.swingup_seconds != null
+    ? `用时 ${d.swingup_seconds}s · 总回报 ${d.return}`
+    : `共 ${d.steps} 步 · 总回报 ${d.return}`;
+  ctx.fillText(tip, 0, 24);
+  ctx.restore();
+  // 角落彩带式光点
+  for (let i = 0; i < 20; i++) {
+    const ang = i * 0.314 + t * 1.5;
+    const r = 220 + 20 * Math.sin(t * 3 + i);
+    ctx.fillStyle = ["#66bb6a", "#4fc3f7", "#ffb74d"][i % 3];
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath();
+    ctx.arc(cx + r * Math.cos(ang), cy + r * Math.sin(ang) * 0.6,
+            3 + 2 * Math.sin(t * 5 + i), 0, 7);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
 }
 
 async function loadDemo() {

@@ -12,10 +12,14 @@
     metrics.jsonl  每次评估追加一行,网页训练曲线的数据源
     meta.json      运行状态摘要
 
+如果训练目录已存在 latest.pt,**默认会自动续练**(回合数/步数从上次的累计往下加);
+要重头训,加 --restart;`--resume` 兼容旧用法,与默认行为相同。
+
 server.py 读取这些文件做演示,训练和展示互不阻塞。
 """
 import argparse
 import json
+import shutil
 import time
 from collections import deque
 from pathlib import Path
@@ -58,7 +62,9 @@ def main():
     p.add_argument("--forever", action="store_true",
                    help="解决后也继续训练")
     p.add_argument("--resume", action="store_true",
-                   help="从 latest.pt 恢复权重继续训练")
+                   help="(已是默认)有 latest.pt 就接着练;保留是为了兼容旧脚本")
+    p.add_argument("--restart", action="store_true",
+                   help="忽略已有训练目录,从头训练(会备份旧目录为 *_old)")
     args = p.parse_args()
 
     env = make_env(args.env, seed=args.seed)
@@ -67,29 +73,51 @@ def main():
                        device=args.device, seed=args.seed)
 
     run_dir = ROOT / "runs" / f"{args.env}_{args.algo}"
+    if args.restart and run_dir.exists():
+        backup = run_dir.with_name(run_dir.name + "_old")
+        if backup.exists():
+            shutil.rmtree(backup)
+        run_dir.rename(backup)
+        print(f"--restart: 旧训练目录已备份为 {backup.name}")
     run_dir.mkdir(parents=True, exist_ok=True)
     latest, best = run_dir / "latest.pt", run_dir / "best.pt"
     metrics_path = run_dir / "metrics.jsonl"
     meta_path = run_dir / "meta.json"
 
-    if args.resume and latest.exists():
-        ckpt = agent.load_checkpoint(latest)
-        agent.load_state_dict(ckpt["state_dict"])
-        print(f"已从 {latest} 恢复权重")
-
+    # 默认自动续练:只要 latest.pt 存在(且没 --restart),就接着练
+    resumed = False
+    episode, env_steps = 0, 0
     best_return = float("-inf")
-    if args.resume and metrics_path.exists():
+    if latest.exists():
+        try:
+            ckpt = agent.load_checkpoint(latest)
+            if (ckpt.get("env") == args.env
+                    and ckpt.get("algo") == args.algo):
+                agent.load_state_dict(ckpt["state_dict"])
+                resumed = True
+                print(f"🔄 继续训练:已从 {latest} 恢复权重")
+            else:
+                print(f"⚠ {latest} 的 env/algo 与当前不一致,改从头训练")
+        except Exception as e:
+            print(f"⚠ 恢复检查点失败 ({e}),改从头训练")
+    if resumed and metrics_path.exists():
         for line in metrics_path.read_text().splitlines():
             rec = json.loads(line)
             best_return = max(best_return, rec.get("eval_return", best_return))
+            episode = max(episode, rec.get("episode", 0))
+            env_steps = max(env_steps, rec.get("env_steps", 0))
+        if episode or env_steps:
+            print(f"   累计已训练 {episode} 回合 / {env_steps} 步,"
+                  f"历史最优回报 {best_return:.1f}")
 
     started = time.time()
-    episode, env_steps, solved = 0, 0, False
+    solved = False
     recent_returns = deque(maxlen=20)
     obs = env.reset(seed=args.seed)
     ep_ret = 0.0
 
-    print(f"开始训练: env={args.env} algo={args.algo} -> {run_dir}")
+    print(f"{'继续训练' if resumed else '开始训练'}: "
+          f"env={args.env} algo={args.algo} -> {run_dir}")
     while True:
         action = agent.act(obs)
         next_obs, reward, terminated, truncated, info = env.step(action)
