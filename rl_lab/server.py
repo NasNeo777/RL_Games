@@ -74,6 +74,7 @@ def run_demo(run, which):
         "return": round(total, 1),
         "steps": steps,
         "success": bool(info.get("success", False)),
+        "swingup_seconds": info.get("swingup_seconds"),
         "which": which,
         "algo": ckpt["algo"],
         "env": ckpt["env"],

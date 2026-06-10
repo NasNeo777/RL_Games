@@ -42,7 +42,7 @@
 <body>
 <header>
   <h1>🤖 强化学习实验室</h1>
-  <span class="sub">二阶摆甩摆 · DQN / PPO · 演示训练中的最新 / 最优模型</span>
+  <span class="sub">二阶摆甩起并稳定倒立 · DQN / PPO · 演示训练中的最新 / 最优模型</span>
 </header>
 <main>
   <div class="panel demo">
@@ -97,16 +97,16 @@ const RENDERERS = {
     const x2 = x1 + scale * spec.l2 * Math.sin(t1 + t2);
     const y2 = y1 + scale * spec.l2 * Math.cos(t1 + t2);
     const h = -Math.cos(t1) - Math.cos(t1 + t2);
-    const up = h > spec.success_height;
+    const up = !!a.up;   // 由环境判定:高度够且角速度小,才算稳定倒立
 
     ctx.clearRect(0, 0, W, H);
-    // 成功线
+    // 倒立区高度线
     const yGoal = cy - scale * spec.success_height;
     ctx.strokeStyle = "rgba(102,187,106,.35)"; ctx.setLineDash([6, 6]);
     ctx.beginPath(); ctx.moveTo(0, yGoal); ctx.lineTo(W, yGoal); ctx.stroke();
     ctx.setLineDash([]);
     ctx.fillStyle = "rgba(102,187,106,.6)"; ctx.font = "12px sans-serif";
-    ctx.fillText("目标高度", 8, yGoal - 6);
+    ctx.fillText(`倒立区(需稳定保持 ${spec.hold_seconds ?? 5} 秒)`, 8, yGoal - 6);
     // 连杆
     ctx.lineCap = "round";
     ctx.strokeStyle = "#4fc3f7"; ctx.lineWidth = 7;
@@ -125,9 +125,13 @@ const RENDERERS = {
       ctx.fillStyle = "rgba(255,183,77,.9)"; ctx.font = "13px sans-serif";
       ctx.fillText(a.tau > 0 ? "力矩 ↻" : "力矩 ↺", x1 + 12, y1 - 10);
     }
-    // 高度读数
+    // 高度读数 + 倒立状态
     ctx.fillStyle = "#8b98a5"; ctx.font = "12px monospace";
     ctx.fillText(`末端高度 h = ${h.toFixed(2)} / 2.00`, 8, H - 10);
+    if (up) {
+      ctx.fillStyle = "#66bb6a"; ctx.font = "bold 14px sans-serif";
+      ctx.fillText("● 倒立稳定中", 8, 22);
+    }
   },
 };
 
@@ -161,8 +165,9 @@ async function loadDemo() {
     $("demoInfo").innerHTML =
       `算法 <b>${d.algo.toUpperCase()}</b> · ${d.which === "best" ? "最优" : "最新"}模型 · ` +
       `回报 <b>${d.return}</b> · ${d.steps} 步 · ` +
-      (d.success ? '<span class="badge ok">✅ 摆上去了</span>'
-                 : '<span class="badge">未成功</span>');
+      (d.success
+        ? `<span class="badge ok">✅ 稳定倒立,摆起用时 ${d.swingup_seconds}s</span>`
+        : '<span class="badge">未成功</span>');
   } catch (e) { $("demoInfo").textContent = "⚠ " + e; }
 }
 
@@ -212,7 +217,7 @@ async function refreshStats() {
       $("metaTable").innerHTML = [
         ["环境 / 算法", `${meta.env} / ${(meta.algo || "?").toUpperCase()}`],
         ["状态", meta.solved
-          ? '<span class="badge ok">✅ 已学会摆上去</span>'
+          ? '<span class="badge ok">✅ 已学会稳定倒立</span>'
           : '<span class="badge">训练中…</span>'],
         ["训练回合", meta.episode ?? "-"],
         ["环境步数", (meta.env_steps ?? 0).toLocaleString()],
@@ -220,6 +225,8 @@ async function refreshStats() {
         ["历史最优回报", meta.best_return ?? "-"],
         ["评估成功率", meta.success_rate != null
           ? (meta.success_rate * 100).toFixed(0) + "%" : "-"],
+        ["平均摆起用时", meta.swingup_seconds != null
+          ? meta.swingup_seconds + " 秒" : "-"],
         ["最后更新", meta.updated ?? "-"],
       ].map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("");
     }

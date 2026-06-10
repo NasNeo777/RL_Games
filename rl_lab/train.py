@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def evaluate(env, agent, episodes):
-    returns, successes = [], 0
+    returns, swingups, successes = [], [], 0
     for i in range(episodes):
         obs = env.reset(seed=10_000 + i)
         total, done = 0.0, False
@@ -38,7 +38,10 @@ def evaluate(env, agent, episodes):
             done = terminated or truncated
         returns.append(total)
         successes += int(info.get("success", False))
-    return sum(returns) / len(returns), successes / episodes
+        if "swingup_seconds" in info:
+            swingups.append(info["swingup_seconds"])
+    avg_swingup = round(sum(swingups) / len(swingups), 2) if swingups else None
+    return sum(returns) / len(returns), successes / episodes, avg_swingup
 
 
 def main():
@@ -107,8 +110,8 @@ def main():
         if episode % args.eval_every != 0:
             continue
 
-        eval_return, success_rate = evaluate(eval_env, agent,
-                                             args.eval_episodes)
+        eval_return, success_rate, avg_swingup = evaluate(
+            eval_env, agent, args.eval_episodes)
         train_avg = sum(recent_returns) / len(recent_returns)
         is_best = eval_return > best_return
         if is_best:
@@ -126,6 +129,7 @@ def main():
             "train_return": round(train_avg, 2),
             "eval_return": round(eval_return, 2),
             "success_rate": round(success_rate, 3),
+            "swingup_seconds": avg_swingup,
             "best_return": round(best_return, 2),
             "solved": solved,
         }
@@ -142,8 +146,9 @@ def main():
         flag = " [BEST]" if is_best else ""
         print(f"回合 {episode:>5} | 步数 {env_steps:>8} | "
               f"训练回报 {train_avg:8.1f} | 评估回报 {eval_return:8.1f} | "
-              f"成功率 {success_rate:.0%}{flag}"
-              + ("  ✅ 已解决" if solved else ""))
+              f"成功率 {success_rate:.0%}"
+              + (f" | 摆起 {avg_swingup}s" if avg_swingup else "")
+              + flag + ("  ✅ 已解决" if solved else ""))
 
         if solved and not args.forever:
             print(f"评估成功率达到 {args.solve_rate:.0%},训练完成。"

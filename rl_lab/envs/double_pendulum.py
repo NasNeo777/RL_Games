@@ -1,13 +1,16 @@
-"""二阶摆(Acrobot)甩摆环境。
+"""二阶摆(Acrobot)甩起 + 稳定倒立环境。
 
-两根连杆吊在固定支点上,只有两杆之间的关节有电机(欠驱动),
-目标是把末端甩到支点上方。动力学采用 Sutton & Barto 书中的
-Acrobot 方程(与 Gymnasium Acrobot-v1 相同的参数)。
+两根连杆吊在固定支点上,只有两杆之间的关节有电机(欠驱动)。
+目标不是甩过某个高度,而是:**尽快甩到倒立位置并稳定保持**。
+连续在倒立区(末端高度 > 1.9 且角速度足够小)保持 HOLD_STEPS 步
+(5 秒)才算成功;成功奖金随用时减少而增加,逼智能体学快速甩起。
+
+倒立是不稳定平衡点,所以控制频率取 20Hz(dt=0.05),
+力矩 5 档 {-2,-1,0,1,2},否则稳不住。
 
 状态: theta1(第一杆与竖直向下方向夹角), theta2(第二杆相对第一杆), 及角速度。
 观测: [cos t1, sin t1, cos t2, sin t2, dt1/4pi, dt2/9pi]
-动作: 关节力矩 {-1, 0, +1}
-奖励: 末端高度 h/2 ∈ [-1,1] 的稠密塑形; h > 1.5 视为摆上去,+50 并结束。
+奖励: 高度塑形(小) - 顶部超速惩罚 + 倒立区每步 +1 + 成功奖金(含速度加成)。
 """
 import math
 
@@ -24,12 +27,14 @@ G = 9.8
 MAX_VEL1 = 4 * math.pi
 MAX_VEL2 = 9 * math.pi
 
-DT = 0.2                   # 一个控制步的时长
-SUBSTEPS = 4               # 每个控制步细分 4 次 RK4,顺便给前端记录平滑帧
+DT = 0.05                  # 控制步长(20Hz,倒立平衡必须够快)
+TORQUES = (-2.0, -1.0, 0.0, 1.0, 2.0)
 
-TORQUES = (-1.0, 0.0, 1.0)
-SUCCESS_HEIGHT = 1.5       # 末端高度阈值(最大为 2)
-SUCCESS_BONUS = 50.0
+UPRIGHT_H = 1.9            # 倒立区:末端高度阈值(满高 2.0)
+UPRIGHT_VEL1 = 2.0         # 倒立区:第一关节角速度上限
+UPRIGHT_VEL2 = 4.0         # 倒立区:第二关节角速度上限
+HOLD_STEPS = 100           # 连续保持 5 秒才算成功
+SUCCESS_BONUS = 100.0      # 成功基础奖金;另按剩余时间最多再翻一倍
 
 
 def _dynamics(s, tau):
@@ -64,19 +69,21 @@ def _wrap(x):
 class DoublePendulumEnv(BaseEnv):
     obs_dim = 6
     n_actions = len(TORQUES)
-    max_steps = 500
+    max_steps = 600            # 30 秒
 
     def __init__(self, seed=None):
         super().__init__()
         self.rng = np.random.default_rng(seed)
         self.s = np.zeros(4)
         self.t = 0
+        self.hold = 0
 
     def reset(self, seed=None):
         if seed is not None:
             self.rng = np.random.default_rng(seed)
         self.s = self.rng.uniform(-0.1, 0.1, size=4)
         self.t = 0
+        self.hold = 0
         self.frames = []
         if self.record:
             self._record_frame(0.0)
@@ -84,23 +91,43 @@ class DoublePendulumEnv(BaseEnv):
 
     def step(self, action):
         tau = TORQUES[int(action)]
-        for _ in range(SUBSTEPS):
-            self.s = _rk4(self.s, tau, DT / SUBSTEPS)
-            self.s[0] = _wrap(self.s[0])
-            self.s[1] = _wrap(self.s[1])
-            self.s[2] = np.clip(self.s[2], -MAX_VEL1, MAX_VEL1)
-            self.s[3] = np.clip(self.s[3], -MAX_VEL2, MAX_VEL2)
-            if self.record:
-                self._record_frame(tau)
+        self.s = _rk4(self.s, tau, DT)
+        self.s[0] = _wrap(self.s[0])
+        self.s[1] = _wrap(self.s[1])
+        self.s[2] = np.clip(self.s[2], -MAX_VEL1, MAX_VEL1)
+        self.s[3] = np.clip(self.s[3], -MAX_VEL2, MAX_VEL2)
         self.t += 1
 
         h = self._tip_height()
-        reward = h / 2.0
-        success = h > SUCCESS_HEIGHT
+        dt1, dt2 = self.s[2], self.s[3]
+
+        # 高度塑形(量级小,只起引导作用)
+        reward = 0.05 * (h / 2.0)
+        # 接近顶部时惩罚角速度:要减速到达,而不是高速甩过
+        if h > 1.6:
+            reward -= 0.005 * (dt1 * dt1 + dt2 * dt2)
+
+        upright = (h > UPRIGHT_H
+                   and abs(dt1) < UPRIGHT_VEL1
+                   and abs(dt2) < UPRIGHT_VEL2)
+        if upright:
+            self.hold += 1
+            reward += 1.0
+        else:
+            self.hold = 0
+
+        success = self.hold >= HOLD_STEPS
         if success:
-            reward += SUCCESS_BONUS
+            # 速度加成:越早稳住,奖金越高(1~2 倍)
+            reward += SUCCESS_BONUS * (1.0 + (self.max_steps - self.t)
+                                       / self.max_steps)
         truncated = (not success) and self.t >= self.max_steps
-        info = {"success": success, "height": h}
+        info = {"success": success, "height": h, "hold": self.hold}
+        if success:
+            info["swingup_steps"] = self.t - HOLD_STEPS   # 摆起用的步数
+            info["swingup_seconds"] = round((self.t - HOLD_STEPS) * DT, 2)
+        if self.record:
+            self._record_frame(tau, upright)
         return self._obs(), reward, success, truncated, info
 
     def _tip_height(self):
@@ -113,18 +140,20 @@ class DoublePendulumEnv(BaseEnv):
                          math.cos(t2), math.sin(t2),
                          dt1 / MAX_VEL1, dt2 / MAX_VEL2], dtype=np.float32)
 
-    def _record_frame(self, tau):
+    def _record_frame(self, tau, upright=False):
         self.frames.append({
             "t1": round(float(self.s[0]), 4),
             "t2": round(float(self.s[1]), 4),
             "tau": tau,
             "h": round(self._tip_height(), 3),
+            "up": int(upright),
         })
 
     def render_spec(self):
         return {
             "type": "double_pendulum",
             "l1": L1, "l2": L2,
-            "success_height": SUCCESS_HEIGHT,
-            "frame_dt": DT / SUBSTEPS,
+            "success_height": UPRIGHT_H,
+            "hold_seconds": HOLD_STEPS * DT,
+            "frame_dt": DT,
         }
