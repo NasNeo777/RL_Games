@@ -1,0 +1,13 @@
+{
+  "env": "double_pendulum",
+  "algo": "ppo",
+  "updated": "2026-06-10 14:55:28",
+  "time": 9.4,
+  "episode": 100,
+  "env_steps": 34716,
+  "train_return": -64.99,
+  "eval_return": -17.33,
+  "success_rate": 1.0,
+  "best_return": -17.33,
+  "solved": true
+}
