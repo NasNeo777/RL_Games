@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>强化学习实验室</title>
+<style>
+  :root {
+    --bg: #0f1419; --panel: #1a2129; --border: #2a3441;
+    --text: #e6edf3; --muted: #8b98a5; --accent: #4fc3f7; --ok: #66bb6a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.6 -apple-system, "PingFang SC", sans-serif; }
+  header { padding: 14px 24px; border-bottom: 1px solid var(--border);
+           display: flex; align-items: baseline; gap: 16px; }
+  header h1 { margin: 0; font-size: 18px; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  main { display: flex; flex-wrap: wrap; gap: 16px; padding: 16px 24px; }
+  .panel { background: var(--panel); border: 1px solid var(--border);
+           border-radius: 10px; padding: 14px; }
+  .demo { flex: 1 1 460px; }
+  .stats { flex: 1 1 380px; }
+  canvas { display: block; width: 100%; border-radius: 8px; background: #0a0e12; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+         margin: 10px 0; }
+  select, button { background: #232d38; color: var(--text); font: inherit;
+                   border: 1px solid var(--border); border-radius: 6px;
+                   padding: 5px 12px; cursor: pointer; }
+  button.active { border-color: var(--accent); color: var(--accent); }
+  button:hover { border-color: var(--accent); }
+  .badge { padding: 1px 9px; border-radius: 10px; font-size: 12px;
+           background: #232d38; color: var(--muted); }
+  .badge.ok { background: rgba(102,187,106,.15); color: var(--ok); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td { padding: 4px 6px; border-bottom: 1px solid var(--border); }
+  td:first-child { color: var(--muted); width: 40%; }
+  h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted);
+       font-weight: 600; }
+  #demoInfo { color: var(--muted); font-size: 13px; min-height: 20px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🤖 强化学习实验室</h1>
+  <span class="sub">二阶摆甩摆 · DQN / PPO · 演示训练中的最新 / 最优模型</span>
+</header>
+<main>
+  <div class="panel demo">
+    <h2>模型演示</h2>
+    <div class="row">
+      <select id="runSelect"></select>
+      <button id="btnBest" class="active">最优模型</button>
+      <button id="btnLatest">最新模型</button>
+      <button id="btnReplay">🔄 重新演示</button>
+      <label>速度 <select id="speed">
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+      </select></label>
+    </div>
+    <canvas id="stage" width="640" height="480"></canvas>
+    <div class="row" id="demoInfo">载入中…</div>
+  </div>
+
+  <div class="panel stats">
+    <h2>训练状态(每 5 秒刷新)</h2>
+    <table id="metaTable"></table>
+    <h2 style="margin-top:16px">评估回报曲线</h2>
+    <canvas id="curve" width="520" height="220"></canvas>
+    <h2 style="margin-top:16px">成功率曲线</h2>
+    <canvas id="rate" width="520" height="120"></canvas>
+  </div>
+</main>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+let state = { run: null, which: "best", demo: null, playT: 0, lastTs: 0 };
+
+/* ===== 渲染器注册表:新游戏在这里加一个 type 对应的画法 ===== */
+const RENDERERS = {
+  double_pendulum(ctx, W, H, spec, frames, fIdx, frac) {
+    const a = frames[fIdx], b = frames[Math.min(fIdx + 1, frames.length - 1)];
+    const lerpAngle = (x, y) => {
+      let d = y - x;
+      if (d > Math.PI) d -= 2 * Math.PI;
+      if (d < -Math.PI) d += 2 * Math.PI;
+      return x + d * frac;
+    };
+    const t1 = lerpAngle(a.t1, b.t1), t2 = lerpAngle(a.t2, b.t2);
+    const cx = W / 2, cy = H / 2;
+    const scale = Math.min(W, H) / 4.6;
+    // theta 从竖直向下方向量起
+    const x1 = cx + scale * spec.l1 * Math.sin(t1);
+    const y1 = cy + scale * spec.l1 * Math.cos(t1);
+    const x2 = x1 + scale * spec.l2 * Math.sin(t1 + t2);
+    const y2 = y1 + scale * spec.l2 * Math.cos(t1 + t2);
+    const h = -Math.cos(t1) - Math.cos(t1 + t2);
+    const up = h > spec.success_height;
+
+    ctx.clearRect(0, 0, W, H);
+    // 成功线
+    const yGoal = cy - scale * spec.success_height;
+    ctx.strokeStyle = "rgba(102,187,106,.35)"; ctx.setLineDash([6, 6]);
+    ctx.beginPath(); ctx.moveTo(0, yGoal); ctx.lineTo(W, yGoal); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(102,187,106,.6)"; ctx.font = "12px sans-serif";
+    ctx.fillText("目标高度", 8, yGoal - 6);
+    // 连杆
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#4fc3f7"; ctx.lineWidth = 7;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x1, y1); ctx.stroke();
+    ctx.strokeStyle = up ? "#66bb6a" : "#81d4fa";
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    // 关节
+    for (const [x, y, r, c] of [[cx, cy, 7, "#e6edf3"],
+                                [x1, y1, 6, "#e6edf3"],
+                                [x2, y2, 8, up ? "#66bb6a" : "#ffb74d"]]) {
+      ctx.fillStyle = c;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+    }
+    // 力矩指示
+    if (a.tau) {
+      ctx.fillStyle = "rgba(255,183,77,.9)"; ctx.font = "13px sans-serif";
+      ctx.fillText(a.tau > 0 ? "力矩 ↻" : "力矩 ↺", x1 + 12, y1 - 10);
+    }
+    // 高度读数
+    ctx.fillStyle = "#8b98a5"; ctx.font = "12px monospace";
+    ctx.fillText(`末端高度 h = ${h.toFixed(2)} / 2.00`, 8, H - 10);
+  },
+};
+
+/* ===== 演示动画 ===== */
+function animate(ts) {
+  requestAnimationFrame(animate);
+  const d = state.demo;
+  if (!d || !d.frames || !d.frames.length) return;
+  const cv = $("stage"), ctx = cv.getContext("2d");
+  const dt = (ts - state.lastTs) / 1000;
+  state.lastTs = ts;
+  const speed = parseFloat($("speed").value);
+  state.playT += dt * speed;
+  const total = d.frames.length * d.spec.frame_dt;
+  if (state.playT >= total) state.playT = 0;          // 循环播放
+  const fpos = state.playT / d.spec.frame_dt;
+  const fIdx = Math.min(Math.floor(fpos), d.frames.length - 1);
+  const renderer = RENDERERS[d.spec.type];
+  if (renderer) renderer(ctx, cv.width, cv.height, d.spec, d.frames,
+                         fIdx, fpos - fIdx);
+}
+
+async function loadDemo() {
+  if (!state.run) return;
+  $("demoInfo").textContent = "正在运行模型生成演示…";
+  try {
+    const r = await fetch(`/api/demo?run=${encodeURIComponent(state.run)}&which=${state.which}`);
+    const d = await r.json();
+    if (d.error) { $("demoInfo").textContent = "⚠ " + d.error; return; }
+    state.demo = d; state.playT = 0;
+    $("demoInfo").innerHTML =
+      `算法 <b>${d.algo.toUpperCase()}</b> · ${d.which === "best" ? "最优" : "最新"}模型 · ` +
+      `回报 <b>${d.return}</b> · ${d.steps} 步 · ` +
+      (d.success ? '<span class="badge ok">✅ 摆上去了</span>'
+                 : '<span class="badge">未成功</span>');
+  } catch (e) { $("demoInfo").textContent = "⚠ " + e; }
+}
+
+/* ===== 训练状态与曲线 ===== */
+function drawCurve(cv, recs, key, color, fmt) {
+  const ctx = cv.getContext("2d"), W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  if (recs.length < 2) {
+    ctx.fillStyle = "#8b98a5"; ctx.font = "12px sans-serif";
+    ctx.fillText("数据不足,等待训练评估…", 10, 20);
+    return;
+  }
+  const xs = recs.map(r => r.env_steps), ys = recs.map(r => r[key]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  let y0 = Math.min(...ys), y1 = Math.max(...ys);
+  if (y1 - y0 < 1e-6) { y0 -= 1; y1 += 1; }
+  const px = x => 36 + (x - x0) / (x1 - x0) * (W - 46);
+  const py = y => H - 18 - (y - y0) / (y1 - y0) * (H - 30);
+  ctx.strokeStyle = "#2a3441";
+  ctx.beginPath(); ctx.moveTo(36, 6); ctx.lineTo(36, H - 18);
+  ctx.lineTo(W - 6, H - 18); ctx.stroke();
+  ctx.fillStyle = "#8b98a5"; ctx.font = "10px monospace";
+  ctx.fillText(fmt(y1), 2, py(y1) + 4); ctx.fillText(fmt(y0), 2, py(y0));
+  ctx.fillText((x1 / 1000).toFixed(0) + "k 步", W - 60, H - 4);
+  ctx.strokeStyle = color; ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  recs.forEach((r, i) => i ? ctx.lineTo(px(r.env_steps), py(r[key]))
+                           : ctx.moveTo(px(r.env_steps), py(r[key])));
+  ctx.stroke();
+}
+
+async function refreshStats() {
+  try {
+    const runs = await (await fetch("/api/runs")).json();
+    const sel = $("runSelect");
+    const names = runs.map(r => r.run);
+    if (names.join() !== [...sel.options].map(o => o.value).join()) {
+      sel.innerHTML = names.map(n => `<option value="${n}">${n}</option>`).join("");
+      if (!state.run || !names.includes(state.run)) {
+        state.run = names[0] || null;
+        if (state.run) loadDemo();
+      }
+      sel.value = state.run || "";
+    }
+    const meta = runs.find(r => r.run === state.run);
+    if (meta) {
+      $("metaTable").innerHTML = [
+        ["环境 / 算法", `${meta.env} / ${(meta.algo || "?").toUpperCase()}`],
+        ["状态", meta.solved
+          ? '<span class="badge ok">✅ 已学会摆上去</span>'
+          : '<span class="badge">训练中…</span>'],
+        ["训练回合", meta.episode ?? "-"],
+        ["环境步数", (meta.env_steps ?? 0).toLocaleString()],
+        ["最近评估回报", meta.eval_return ?? "-"],
+        ["历史最优回报", meta.best_return ?? "-"],
+        ["评估成功率", meta.success_rate != null
+          ? (meta.success_rate * 100).toFixed(0) + "%" : "-"],
+        ["最后更新", meta.updated ?? "-"],
+      ].map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("");
+    }
+    if (state.run) {
+      const recs = await (await fetch(
+        `/api/metrics?run=${encodeURIComponent(state.run)}`)).json();
+      drawCurve($("curve"), recs, "eval_return", "#4fc3f7",
+                v => v.toFixed(0));
+      drawCurve($("rate"), recs, "success_rate", "#66bb6a",
+                v => (v * 100).toFixed(0) + "%");
+    }
+  } catch (e) { /* 服务器暂不可达,下个周期再试 */ }
+}
+
+/* ===== 事件绑定 ===== */
+$("runSelect").onchange = e => { state.run = e.target.value; loadDemo(); refreshStats(); };
+$("btnBest").onclick = () => { state.which = "best";
+  $("btnBest").classList.add("active"); $("btnLatest").classList.remove("active");
+  loadDemo(); };
+$("btnLatest").onclick = () => { state.which = "latest";
+  $("btnLatest").classList.add("active"); $("btnBest").classList.remove("active");
+  loadDemo(); };
+$("btnReplay").onclick = loadDemo;
+
+refreshStats();
+setInterval(refreshStats, 5000);
+requestAnimationFrame(ts => { state.lastTs = ts; requestAnimationFrame(animate); });
+</script>
+</body>
+</html>
