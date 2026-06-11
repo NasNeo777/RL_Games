@@ -52,6 +52,8 @@
       <button id="btnBest" class="active">最优模型</button>
       <button id="btnLatest">最新模型</button>
       <button id="btnReplay">🔄 重新演示</button>
+      <button id="btnAutoNew"
+              title="每跑完一遍演示就重新读取检查点:训练中模型更新了就用新模型跑下一局,没更新则原样重放">♻️ 跑完刷新模型</button>
       <label>速度 <select id="speed">
         <option value="0.5">0.5×</option>
         <option value="1" selected>1×</option>
@@ -76,7 +78,8 @@
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
-let state = { run: null, which: "best", demo: null, playT: 0, lastTs: 0 };
+let state = { run: null, which: "best", demo: null, playT: 0, lastTs: 0,
+              autoNew: false, refreshing: false };
 
 /* ===== 渲染器注册表:新游戏在这里加一个 type 对应的画法 ===== */
 const RENDERERS = {
@@ -312,7 +315,22 @@ function animate(ts) {
   state.playT += dt * speed;
   const total = d.frames.length * d.spec.frame_dt;
   const holdEnd = total + (d.success ? HOLD_AT_SUCCESS : 0);
-  if (state.playT >= holdEnd) state.playT = 0;        // 循环播放
+  if (state.playT >= holdEnd) {
+    if (state.autoNew) {
+      // 跑完一遍:重新拉演示。检查点更新过(训练中 mtime 变化)
+      // 服务器会用新模型跑新一局,没更新则缓存秒回、等同重放。
+      if (!state.refreshing) {
+        state.refreshing = true;
+        loadDemo(false, true).then(ok => {
+          if (!ok) state.playT = 0;   // 拉取失败:先重放旧的,下一遍再试
+          state.refreshing = false;
+        });
+      }
+      state.playT = holdEnd;          // 定格末帧,等新一局加载
+    } else {
+      state.playT = 0;                // 循环播放
+    }
+  }
   // 进入定格阶段:fpos 卡在最后一帧,celebT 计成功庆祝时间
   let fpos, celebT = 0;
   if (state.playT < total) {
@@ -375,16 +393,17 @@ function successText(d) {
   return "成功";
 }
 
-async function loadDemo(replay = false) {
-  if (!state.run) return;
-  $("demoInfo").textContent = replay ? "正在重新运行一局…"
-                                     : "正在加载演示…";
+async function loadDemo(replay = false, auto = false) {
+  if (!state.run) return false;
+  $("demoInfo").textContent = auto ? "♻️ 跑完一遍,正在刷新模型…"
+    : replay ? "正在重新运行一局…" : "正在加载演示…";
   try {
     const r = await fetch(`/api/demo?run=${encodeURIComponent(state.run)}`
                           + `&which=${state.which}${replay ? "&replay=1" : ""}`);
     const d = await r.json();
-    if (d.error) { $("demoInfo").textContent = "⚠ " + d.error; return; }
-    state.demo = d; state.playT = 0; state.lastVideoImg = null;
+    if (d.error) { $("demoInfo").textContent = "⚠ " + d.error; return false; }
+    state.demo = d; state.playT = 0;
+    state.lastVideoImg = null; state.lastObsImg = null;
     $("demoInfo").innerHTML =
       `算法 <b>${d.algo.toUpperCase()}</b> · ${d.which === "best" ? "最优" : "最新"}模型 · ` +
       `回报 <b>${d.return}</b> · ${d.steps} 步 · ` +
@@ -392,7 +411,8 @@ async function loadDemo(replay = false) {
         ? `<span class="badge ok">✅ ${successText(d)}</span>`
         : '<span class="badge">未成功</span>'
           + (d.score != null ? ` <span class="badge">得分 ${d.score}</span>` : ""));
-  } catch (e) { $("demoInfo").textContent = "⚠ " + e; }
+    return true;
+  } catch (e) { $("demoInfo").textContent = "⚠ " + e; return false; }
 }
 
 /* ===== 训练状态与曲线 ===== */
@@ -474,6 +494,10 @@ $("btnLatest").onclick = () => { state.which = "latest";
   $("btnLatest").classList.add("active"); $("btnBest").classList.remove("active");
   loadDemo(); };
 $("btnReplay").onclick = () => loadDemo(true);
+$("btnAutoNew").onclick = () => {
+  state.autoNew = !state.autoNew;
+  $("btnAutoNew").classList.toggle("active", state.autoNew);
+};
 
 refreshStats();
 setInterval(refreshStats, 5000);
