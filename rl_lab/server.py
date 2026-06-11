@@ -54,10 +54,27 @@ def read_metrics(run, limit):
     return records
 
 
-def run_demo(run, which):
+# 演示缓存:同一个检查点(以 mtime 区分版本)只跑一次。
+# 训练每次评估会覆盖 latest.pt / best.pt,mtime 变化自动让缓存失效。
+_DEMO_CACHE = {}
+_DEMO_CACHE_MAX = 8
+
+
+def run_demo(run, which, replay=False):
     ckpt_path = RUNS_DIR / run / f"{which}.pt"
     if not ckpt_path.exists():
         return {"error": f"找不到检查点 {ckpt_path.name}"}
+    key = (run, which, ckpt_path.stat().st_mtime_ns)
+    if not replay and key in _DEMO_CACHE:
+        return _DEMO_CACHE[key]
+    result = _run_demo_episode(ckpt_path, which)
+    if len(_DEMO_CACHE) >= _DEMO_CACHE_MAX:
+        _DEMO_CACHE.pop(next(iter(_DEMO_CACHE)))
+    _DEMO_CACHE[key] = result
+    return result
+
+
+def _run_demo_episode(ckpt_path, which):
     env, agent, ckpt = load_agent_for_demo(ckpt_path)
     env.record = True
     obs = env.reset()
@@ -96,7 +113,8 @@ class Handler(BaseHTTPRequestHandler):
                                              int(q.get("limit", "300"))))
             elif url.path == "/api/demo":
                 self._json(200, run_demo(q.get("run", ""),
-                                         q.get("which", "best")))
+                                         q.get("which", "best"),
+                                         replay=q.get("replay") == "1"))
             else:
                 self._json(404, {"error": "not found"})
         except Exception:

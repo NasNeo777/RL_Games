@@ -33,8 +33,9 @@ class GymEnv(BaseEnv):
     gym_kwargs = {}           # 选填:传给 gym.make 的参数
     max_steps = 1000
     success_bonus = 50.0      # 达成 is_success 时的额外奖金(0 表示不加)
-    render_every = 3          # 每隔几步抓一帧演示画面(权衡流畅度和体积)
-    jpeg_quality = 65
+    render_every = 2          # 每隔几步抓一帧演示画面(权衡流畅度和体积)
+    render_height = 512       # 高于此才缩;多数小游戏原生分辨率本就不高,保留原生
+    jpeg_quality = 75
 
     def __init__(self, seed=None):
         super().__init__()
@@ -86,6 +87,9 @@ class GymEnv(BaseEnv):
         from PIL import Image
         rgb = self._env.render()
         img = Image.fromarray(np.asarray(rgb))
+        if img.height > self.render_height:
+            w = round(img.width * self.render_height / img.height)
+            img = img.resize((w, self.render_height), Image.BILINEAR)
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=self.jpeg_quality)
         frame = {"img": "data:image/jpeg;base64,"
