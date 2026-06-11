@@ -126,7 +126,7 @@ class MarioEnv(BaseEnv):
             self._record_frame(info)
         return obs, reward, bool(terminated), bool(truncated), info
 
-    # ---- 网页演示(录原始彩色画面,预处理只给 agent 看) ----
+    # ---- 网页演示:每帧录原始彩色画面 + agent 实际看到的预处理观测 ----
 
     def _record_frame(self, info):
         from PIL import Image
@@ -135,6 +135,11 @@ class MarioEnv(BaseEnv):
         img.save(buf, format="JPEG", quality=self.jpeg_quality)
         frame = {"img": "data:image/jpeg;base64,"
                         + base64.b64encode(buf.getvalue()).decode()}
+        # 叠帧栈里最新的 84x84 灰度帧,PNG 无损(本来就是给网络看的小图)
+        obs_buf = io.BytesIO()
+        Image.fromarray(self._stack[-1], mode="L").save(obs_buf, format="PNG")
+        frame["obs"] = ("data:image/png;base64,"
+                        + base64.b64encode(obs_buf.getvalue()).decode())
         if "score" in info:
             frame["score"] = int(info["score"])
         self.frames.append(frame)
@@ -142,4 +147,5 @@ class MarioEnv(BaseEnv):
     def render_spec(self):
         # 每个 agent 步 = SKIP 个 60fps 游戏帧
         return {"type": "video",
-                "frame_dt": self.render_every * SKIP / 60.0}
+                "frame_dt": self.render_every * SKIP / 60.0,
+                "obs_label": f"agent 观测 {SIZE}×{SIZE} 灰度×{STACK}帧(最新帧)"}

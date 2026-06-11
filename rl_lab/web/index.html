@@ -82,38 +82,72 @@ let state = { run: null, which: "best", demo: null, playT: 0, lastTs: 0 };
 const RENDERERS = {
   // 通用视频渲染器:Gymnasium 适配器(gym_adapter.py)抓的 JPEG 帧直接播放。
   // 任何通过 GymEnv 接入的游戏都走这里,不用再写专属画法。
+  // 帧里带 obs 字段时(如 mario 的预处理观测)左右分屏:
+  // 左边原始画面,右边 agent 网络真正看到的输入。
   // 滑动窗口预解码:播放头前 12 帧提前建 Image,身后 24 帧外释放,
   // 既不卡顿也不会把整局几百张解码位图都压进内存。
   video(ctx, W, H, spec, frames, fIdx, frac) {
     const ahead = Math.min(fIdx + 12, frames.length);
     for (let i = fIdx; i < ahead; i++) {
-      if (!frames[i]._img) {
-        frames[i]._img = new Image();
-        frames[i]._img.src = frames[i].img;
+      const fr = frames[i];
+      if (!fr._img) { fr._img = new Image(); fr._img.src = fr.img; }
+      if (fr.obs && !fr._obsImg) {
+        fr._obsImg = new Image();
+        fr._obsImg.src = fr.obs;
       }
     }
-    for (let i = 0; i < fIdx - 24; i++) frames[i]._img = null;
+    for (let i = 0; i < fIdx - 24; i++) {
+      frames[i]._img = null;
+      frames[i]._obsImg = null;
+    }
     const f = frames[fIdx];
     if (!f._img) { f._img = new Image(); f._img.src = f.img; }
     ctx.clearRect(0, 0, W, H);
     const img = f._img.complete && f._img.naturalWidth ? f._img
       : state.lastVideoImg;                  // 没解码完就保持上一帧,不闪黑
+    const hasObs = !!f.obs;
+    let obsImg = null;
+    if (hasObs) {
+      if (!f._obsImg) { f._obsImg = new Image(); f._obsImg.src = f.obs; }
+      obsImg = f._obsImg.complete && f._obsImg.naturalWidth ? f._obsImg
+        : state.lastObsImg;
+    }
+    const labelH = hasObs ? 20 : 0, gap = hasObs ? 10 : 0;
+    const mainW = hasObs ? Math.round(W * 0.62) : W;
+    // 像素风游戏放大时关闭平滑,像素锐利不发糊
+    const drawIn = (image, x0, w) => {
+      ctx.imageSmoothingEnabled = false;
+      const s = Math.min(w / image.naturalWidth,
+                         (H - labelH) / image.naturalHeight);
+      const dw = image.naturalWidth * s, dh = image.naturalHeight * s;
+      const dx = x0 + (w - dw) / 2;
+      ctx.drawImage(image, dx, labelH + (H - labelH - dh) / 2, dw, dh);
+      ctx.imageSmoothingEnabled = true;
+      return dx;                             // 实际绘制的左边界,给标签对齐用
+    };
     if (img) {
       state.lastVideoImg = img;
-      // 像素风游戏放大时关闭平滑,像素锐利不发糊
-      ctx.imageSmoothingEnabled = false;
-      const s = Math.min(W / img.naturalWidth, H / img.naturalHeight);
-      const dw = img.naturalWidth * s, dh = img.naturalHeight * s;
-      ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
-      ctx.imageSmoothingEnabled = true;
+      const dx = drawIn(img, 0, mainW);
+      if (hasObs) {
+        ctx.fillStyle = "#8b98a5";
+        ctx.font = "12px -apple-system, 'PingFang SC', sans-serif";
+        ctx.fillText("原始画面(仅供观看)", dx, 14);
+      }
     } else {
       ctx.fillStyle = "#8b98a5"; ctx.font = "13px sans-serif";
       ctx.fillText("画面加载中…", W / 2 - 36, H / 2);
     }
+    if (hasObs && obsImg) {
+      state.lastObsImg = obsImg;
+      const dx = drawIn(obsImg, mainW + gap, W - mainW - gap);
+      ctx.fillStyle = "#8b98a5";
+      ctx.font = "12px -apple-system, 'PingFang SC', sans-serif";
+      ctx.fillText(spec.obs_label || "agent 观测", dx, 14);
+    }
     if (f.score != null) {
       ctx.fillStyle = "#e6edf3";
       ctx.font = "bold 24px -apple-system, 'PingFang SC', sans-serif";
-      ctx.fillText(`得分 ${f.score}`, 12, 32);
+      ctx.fillText(`得分 ${f.score}`, 12, labelH + 32);
     }
   },
 
