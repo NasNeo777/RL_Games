@@ -131,7 +131,7 @@ const RENDERERS = {
       if (hasObs) {
         ctx.fillStyle = "#8b98a5";
         ctx.font = "12px -apple-system, 'PingFang SC', sans-serif";
-        ctx.fillText("原始画面(仅供观看)", dx, 14);
+        ctx.fillText("原始画面(仅供观看)", dx, 14, mainW - dx);
       }
     } else {
       ctx.fillStyle = "#8b98a5"; ctx.font = "13px sans-serif";
@@ -142,7 +142,7 @@ const RENDERERS = {
       const dx = drawIn(obsImg, mainW + gap, W - mainW - gap);
       ctx.fillStyle = "#8b98a5";
       ctx.font = "12px -apple-system, 'PingFang SC', sans-serif";
-      ctx.fillText(spec.obs_label || "agent 观测", dx, 14);
+      ctx.fillText(spec.obs_label || "agent 观测", dx, 14, W - dx);
     }
     if (f.score != null) {
       ctx.fillStyle = "#e6edf3";

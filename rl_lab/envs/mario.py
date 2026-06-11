@@ -12,8 +12,8 @@ Atari 式预处理流水线(本文件自己实现,方便学习):
 最终观测是 (4, 84, 84) uint8,SB3 的 CnnPolicy 会自动 /255 归一化。
 
 动作用 SIMPLE_MOVEMENT 7 键组合(不动/右/右跳/右加速/右加速跳/跳/左)。
-奖励是包内置的:x 前进量 + 时间流逝惩罚 + 死亡 -15,再乘 REWARD_SCALE
-压小数值;拿到旗子(flag_get)视为成功,加奖金并结束回合。
+奖励直接用包内置的(x 前进量 + 时间流逝惩罚 + 死亡 -15,包内已裁剪
+到 ±15,不再缩放);拿到旗子(flag_get)视为成功,加奖金并结束回合。
 """
 import base64
 import io
@@ -26,7 +26,6 @@ from .base import BaseEnv
 SKIP = 4          # 跳帧数:每个 agent 步 = 4 个游戏帧
 SIZE = 84         # 缩小后的边长
 STACK = 4         # 叠帧数
-REWARD_SCALE = 0.1
 
 
 def _patch_numpy2():
@@ -111,7 +110,7 @@ class MarioEnv(BaseEnv):
         obs = self._observe(frame)
 
         self.t += 1
-        reward = total_reward * REWARD_SCALE
+        reward = total_reward
         success = bool(info.get("flag_get"))
         if success:
             reward += self.success_bonus

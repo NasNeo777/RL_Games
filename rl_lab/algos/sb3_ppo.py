@@ -12,8 +12,18 @@ import io
 import json
 import time
 from collections import deque
+from functools import partial
 
 from .base import BaseAgent
+
+
+def _make_sb3_env(env_name, seed):
+    """SubprocVecEnv 子进程里的环境工厂(模块级函数才能被 pickle)。"""
+    from stable_baselines3.common.monitor import Monitor
+
+    from ..envs import make_env
+    from ..envs.to_gym import BaseEnvToGym
+    return Monitor(BaseEnvToGym(make_env(env_name, seed=seed)))
 
 
 class SB3PPOAgent(BaseAgent):
@@ -21,11 +31,22 @@ class SB3PPOAgent(BaseAgent):
     trains_itself = True
     supports_image_obs = True   # 图像观测自动切 CnnPolicy
 
-    # 与之前手写版调优一致的超参
+    # 向量观测(MlpPolicy)超参,与之前手写版调优一致
     HP = dict(learning_rate=3e-4, n_steps=2048, batch_size=256, n_epochs=10,
               gamma=0.995, gae_lambda=0.95, clip_range=0.2,
               ent_coef=0.003, vf_coef=0.5, max_grad_norm=0.5)
     POLICY_KWARGS = dict(net_arch=[128, 128])
+
+    # 图像观测(CnnPolicy)超参,参考已验证的马里奥 PPO 配方:
+    # 小 gamma(0.95)+ 紧裁剪(0.1)+ target_kl 早停,多环境并行采样
+    HP_IMAGE = dict(learning_rate=2.5e-4, n_steps=2048, batch_size=2048,
+                    n_epochs=10, gamma=0.95, gae_lambda=0.95, clip_range=0.1,
+                    ent_coef=0.1, vf_coef=0.5, max_grad_norm=0.8,
+                    target_kl=0.03)
+    # 熵系数从 HP_IMAGE["ent_coef"] 线性衰减到 end(按累计环境步数),
+    # 前期多探索,后期降噪声帮收敛
+    ENT_DECAY = dict(end=0.005, steps=2_000_000)
+    N_ENVS_IMAGE = 8            # 图像环境默认并行数(--n-envs 可覆盖)
 
     def __init__(self, obs_dim, n_actions, device="cpu", seed=None):
         super().__init__(obs_dim, n_actions, device)
@@ -55,24 +76,54 @@ class SB3PPOAgent(BaseAgent):
         from ..envs.to_gym import BaseEnvToGym
         from ..evaluation import evaluate
 
-        venv = Monitor(BaseEnvToGym(env))
+        image_obs = env.obs_shape is not None
+        n_envs = getattr(args, "n_envs", 0) \
+            or (self.N_ENVS_IMAGE if image_obs else 1)
+        if n_envs > 1:
+            # 多环境并行采样:图像环境单局慢,靠并行喂饱大 rollout
+            from stable_baselines3.common.vec_env import SubprocVecEnv
+            venv = SubprocVecEnv([
+                partial(_make_sb3_env, args.env, (args.seed or 0) + i)
+                for i in range(n_envs)])
+            print(f"并行采样: SubprocVecEnv x {n_envs}")
+        else:
+            venv = Monitor(BaseEnvToGym(env))
+
         if self.model is not None:                     # 续练
-            self.model.set_env(venv)
+            if self.model.n_envs != getattr(venv, "num_envs", 1):
+                # set_env 不允许改并行数,经由 zip 重载来换
+                buf = io.BytesIO()
+                self.model.save(buf)
+                buf.seek(0)
+                self.model = PPO.load(buf, env=venv, device=self.device)
+            else:
+                self.model.set_env(venv)
         else:
             # 图像观测(如 mario 的 4x84x84)用 CNN 策略,SB3 自动 /255;
             # CnnPolicy 的特征提取器(NatureCNN)后面不再需要额外 MLP 层
-            image_obs = env.obs_shape is not None
             policy = "CnnPolicy" if image_obs else "MlpPolicy"
             policy_kwargs = {} if image_obs else dict(self.POLICY_KWARGS)
+            hp = self.HP_IMAGE if image_obs else self.HP
             self.model = PPO(policy, venv, device=self.device,
                              seed=self.seed, verbose=0,
                              policy_kwargs=policy_kwargs,
-                             **self.HP)
+                             **hp)
 
         agent = self
         latest, best = run_dir / "latest.pt", run_dir / "best.pt"
         metrics_path, meta_path = run_dir / "metrics.jsonl", run_dir / "meta.json"
         started = time.time()
+
+        class EntropyDecay(BaseCallback):
+            """熵系数线性衰减(按累计环境步数,续练时接着衰减)。"""
+
+            def _on_step(self):
+                start = agent.HP_IMAGE["ent_coef"]
+                frac = min(1.0, (env_steps0 + self.num_timesteps)
+                           / agent.ENT_DECAY["steps"])
+                self.model.ent_coef = \
+                    start + frac * (agent.ENT_DECAY["end"] - start)
+                return True
 
         class EvalCallback(BaseCallback):
             def __init__(self):
@@ -137,6 +188,9 @@ class SB3PPOAgent(BaseAgent):
                     return False
                 return True
 
+        callbacks = [EvalCallback()]
+        if image_obs:
+            callbacks.append(EntropyDecay())
         self.model.learn(total_timesteps=int(1e12),
-                         callback=EvalCallback(),
+                         callback=callbacks,
                          reset_num_timesteps=True)

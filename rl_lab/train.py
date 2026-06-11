@@ -37,6 +37,8 @@ def main():
     p.add_argument("--algo", default="ppo", choices=sorted(ALGOS))
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cpu")
+    p.add_argument("--n-envs", type=int, default=0,
+                   help="SB3 并行采样环境数;0=自动(图像观测 8,其余 1)")
     p.add_argument("--eval-every", type=int, default=20,
                    help="每多少个训练回合评估一次")
     p.add_argument("--eval-episodes", type=int, default=10)
