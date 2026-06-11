@@ -80,6 +80,30 @@ let state = { run: null, which: "best", demo: null, playT: 0, lastTs: 0 };
 
 /* ===== 渲染器注册表:新游戏在这里加一个 type 对应的画法 ===== */
 const RENDERERS = {
+  // 通用视频渲染器:Gymnasium 适配器(gym_adapter.py)抓的 JPEG 帧直接播放。
+  // 任何通过 GymEnv 接入的游戏都走这里,不用再写专属画法。
+  video(ctx, W, H, spec, frames, fIdx, frac) {
+    const f = frames[fIdx];
+    if (!f._img) {
+      f._img = new Image();
+      f._img.src = f.img;
+    }
+    ctx.clearRect(0, 0, W, H);
+    if (f._img.complete && f._img.naturalWidth) {
+      const s = Math.min(W / f._img.naturalWidth, H / f._img.naturalHeight);
+      const dw = f._img.naturalWidth * s, dh = f._img.naturalHeight * s;
+      ctx.drawImage(f._img, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    } else {
+      ctx.fillStyle = "#8b98a5"; ctx.font = "13px sans-serif";
+      ctx.fillText("画面加载中…", W / 2 - 36, H / 2);
+    }
+    if (f.score != null) {
+      ctx.fillStyle = "#e6edf3";
+      ctx.font = "bold 24px -apple-system, 'PingFang SC', sans-serif";
+      ctx.fillText(`得分 ${f.score}`, 12, 32);
+    }
+  },
+
   mountain_car(ctx, W, H, spec, frames, fIdx, frac) {
     const a = frames[fIdx], b = frames[Math.min(fIdx + 1, frames.length - 1)];
     const x = a.x + (b.x - a.x) * frac;

@@ -40,6 +40,18 @@ Ctrl+C 同时停掉两者;训练自然结束后服务器会留着供演示。也
 
 网页端可以切换不同 run、切换最优/最新模型、循环播放演示动画,并每 5 秒刷新训练曲线。
 
+## 内置环境
+
+| 名字 | 任务 | 成功条件 |
+|---|---|---|
+| `double_pendulum` | 二阶摆甩起 + 稳定倒立 | 倒立区连续保持 5 秒 |
+| `mountain_car` | 小车爬山(MountainCar-v0 物理) | 登顶(位置 ≥ 0.5) |
+| `flappy_bird` | Flappy Bird([flappy-bird-gymnasium](https://github.com/markub3327/flappy-bird-gymnasium) 集成包) | 连过 20 根管道 |
+
+```bash
+./start.sh --env flappy_bird --algo dqn
+```
+
 ## 任务说明:二阶摆甩起 + 稳定倒立
 
 两杆吊在固定支点,只有两杆之间的关节有电机(欠驱动),
@@ -53,12 +65,31 @@ Ctrl+C 同时停掉两者;训练自然结束后服务器会留着供演示。也
 
 ## 扩展:接入新小游戏
 
-1. 在 `rl_lab/envs/` 新建文件,继承 `BaseEnv`(见 `envs/base.py` 的接口说明),
-   实现 `reset / step / render_spec`,并在 `record=True` 时往 `self.frames` 记录渲染帧;
-2. 在 `rl_lab/envs/__init__.py` 的 `ENVS` 注册表登记名字;
-3. 在 `rl_lab/web/index.html` 的 `RENDERERS` 里按 `render_spec()["type"]`
-   加一个 canvas 画法(输入是你记录的 frames);
-4. `python -m rl_lab.train --env 新名字 --algo ppo` 直接开练。
+**推荐方式:用 Gymnasium 集成包**(不自己写游戏逻辑)。
+继承 `envs/gym_adapter.py` 的 `GymEnv`,几行就够:
+
+```python
+# rl_lab/envs/my_game.py
+from .gym_adapter import GymEnv
+
+class MyGameEnv(GymEnv):
+    env_id = "CartPole-v1"          # gym.make 的环境 id
+    import_module = None             # 第三方包需要 import 注册时填包名
+    max_steps = 500
+
+    def is_success(self, info):     # 按游戏定义"成功"
+        return False
+```
+
+然后在 `rl_lab/envs/__init__.py` 的 `ENVS` 登记名字即可。
+演示画面由适配器自动抓 `rgb_array` 压成 JPEG 帧,前端用通用
+`video` 渲染器播放,**不需要写任何前端代码**。`flappy_bird` 就是这么接的。
+
+自己写物理的环境(如本项目的 `double_pendulum`)走另一条路:
+继承 `BaseEnv` 实现 `reset / step / render_spec` 并录制状态帧,
+再在 `web/index.html` 的 `RENDERERS` 加一个对应 canvas 画法。
+
+接好后直接 `python -m rl_lab.train --env 新名字 --algo ppo` 开练。
 
 ## 扩展:接入新算法
 
