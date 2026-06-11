@@ -91,11 +91,25 @@ class MyGameEnv(GymEnv):
 
 接好后直接 `python -m rl_lab.train --env 新名字 --algo ppo` 开练。
 
+## 算法
+
+| 名字 | 实现 |
+|---|---|
+| `ppo` | **Stable-Baselines3 PPO**(`algos/sb3_ppo.py` 适配层) |
+| `dqn` | 手写 Double DQN |
+| `ppo_custom` | 旧的手写 PPO,保留以兼容历史检查点 |
+
 ## 扩展:接入新算法
 
-实现 `rl_lab/algos/base.py` 的 `BaseAgent` 接口
-(`act / observe / update / state_dict / load_state_dict`),
-在 `rl_lab/algos/__init__.py` 的 `ALGOS` 登记即可。
+两种方式:
+
+- **自己实现**:实现 `rl_lab/algos/base.py` 的 `BaseAgent` 接口
+  (`act / observe / update / state_dict / load_state_dict`),在
+  `rl_lab/algos/__init__.py` 的 `ALGOS` 登记。
+- **接外部库(如 SB3 的其他算法)**:参考 `algos/sb3_ppo.py`,
+  设 `trains_itself = True` 并实现 `train_loop()`,由外部库自跑训练循环,
+  评估/检查点/曲线数据通过回调按框架格式落盘,界面无感知差异。
+  环境侧用 `envs/to_gym.py` 把 BaseEnv 包成标准 gymnasium.Env 即可。
 
 ## 目录结构
 

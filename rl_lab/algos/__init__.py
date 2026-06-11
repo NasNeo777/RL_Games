@@ -1,10 +1,12 @@
 """算法注册表。新算法在这里登记即可被 train.py / server.py 使用。"""
 from .dqn import DQNAgent
 from .ppo import PPOAgent
+from .sb3_ppo import SB3PPOAgent
 
 ALGOS = {
     "dqn": DQNAgent,
-    "ppo": PPOAgent,
+    "ppo": SB3PPOAgent,        # PPO 用 Stable-Baselines3 实现
+    "ppo_custom": PPOAgent,    # 旧的手写版,保留以兼容历史检查点
 }
 
 

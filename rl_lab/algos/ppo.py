@@ -7,7 +7,7 @@ from .base import BaseAgent, mlp
 
 
 class PPOAgent(BaseAgent):
-    name = "ppo"
+    name = "ppo_custom"
 
     # gamma 0.995(视野约 10 秒):甩起→稳住→成功奖金的因果链长达数百步,
     # 0.99 时奖金折扣到几乎不可见。ent_coef 0.003:倒立是不稳定平衡,

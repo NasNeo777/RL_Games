@@ -26,26 +26,9 @@ from pathlib import Path
 
 from .algos import ALGOS, make_agent
 from .envs import ENVS, make_env
+from .evaluation import evaluate
 
 ROOT = Path(__file__).resolve().parent.parent
-
-
-def evaluate(env, agent, episodes):
-    returns, swingups, successes = [], [], 0
-    for i in range(episodes):
-        obs = env.reset(seed=10_000 + i)
-        total, done = 0.0, False
-        while not done:
-            obs, r, terminated, truncated, info = env.step(
-                agent.act(obs, deterministic=True))
-            total += r
-            done = terminated or truncated
-        returns.append(total)
-        successes += int(info.get("success", False))
-        if "swingup_seconds" in info:
-            swingups.append(info["swingup_seconds"])
-    avg_swingup = round(sum(swingups) / len(swingups), 2) if swingups else None
-    return sum(returns) / len(returns), successes / episodes, avg_swingup
 
 
 def main():
@@ -110,14 +93,21 @@ def main():
             print(f"   累计已训练 {episode} 回合 / {env_steps} 步,"
                   f"历史最优回报 {best_return:.1f}")
 
+    print(f"{'继续训练' if resumed else '开始训练'}: "
+          f"env={args.env} algo={args.algo} -> {run_dir}")
+
+    # SB3 这类算法自带训练循环,评估/检查点/metrics 由其回调按同一格式落盘
+    if getattr(agent, "trains_itself", False):
+        agent.train_loop(env=env, eval_env=eval_env, args=args,
+                         run_dir=run_dir, episode0=episode,
+                         env_steps0=env_steps, best_return=best_return)
+        return
+
     started = time.time()
     solved = False
     recent_returns = deque(maxlen=20)
     obs = env.reset(seed=args.seed)
     ep_ret = 0.0
-
-    print(f"{'继续训练' if resumed else '开始训练'}: "
-          f"env={args.env} algo={args.algo} -> {run_dir}")
     while True:
         action = agent.act(obs)
         next_obs, reward, terminated, truncated, info = env.step(action)
