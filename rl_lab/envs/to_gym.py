@@ -10,8 +10,12 @@ class BaseEnvToGym(gym.Env):
     def __init__(self, base_env):
         super().__init__()
         self.base = base_env
-        self.observation_space = spaces.Box(
-            -np.inf, np.inf, shape=(base_env.obs_dim,), dtype=np.float32)
+        if base_env.obs_shape:    # 图像观测(通道, 高, 宽) uint8
+            self.observation_space = spaces.Box(
+                0, 255, shape=base_env.obs_shape, dtype=np.uint8)
+        else:                     # 向量观测
+            self.observation_space = spaces.Box(
+                -np.inf, np.inf, shape=(base_env.obs_dim,), dtype=np.float32)
         self.action_space = spaces.Discrete(base_env.n_actions)
 
     def reset(self, seed=None, options=None):

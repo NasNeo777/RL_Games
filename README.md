@@ -47,9 +47,22 @@ Ctrl+C 同时停掉两者;训练自然结束后服务器会留着供演示。也
 | `double_pendulum` | 二阶摆甩起 + 稳定倒立 | 倒立区连续保持 5 秒 |
 | `mountain_car` | 小车爬山(MountainCar-v0 物理) | 登顶(位置 ≥ 0.5) |
 | `flappy_bird` | Flappy Bird([flappy-bird-gymnasium](https://github.com/markub3327/flappy-bird-gymnasium) 集成包) | 连过 20 根管道 |
+| `mario` | 超级马里奥世界 1-1([gym-super-mario-bros](https://github.com/Kautenja/gym-super-mario-bros) 集成包,图像观测) | 拿到关底旗子 |
 
 ```bash
 ./start.sh --env flappy_bird --algo dqn
+./start.sh --env mario              # 图像观测,只支持 ppo(自动用 CNN 策略)
+```
+
+`mario` 是本项目第一个**图像观测**环境:agent 不直接看 240x256 RGB
+原始画面,观测经过跳帧 4(相邻两帧取 max 去闪烁)→ 灰度化 →
+缩小栅格化到 84x84 → 叠 4 帧,最终是 (4, 84, 84) uint8
+(经典 Atari 式预处理,实现见 `envs/mario.py`,PPO 自动切 CnnPolicy)。
+网页演示录的仍是原始彩色画面,预处理只给 agent 看。
+依赖(首次使用前装一次):
+
+```bash
+.venv/bin/pip install gym-super-mario-bros gym   # gym 仅为包内注册所需
 ```
 
 ## 任务说明:二阶摆甩起 + 稳定倒立

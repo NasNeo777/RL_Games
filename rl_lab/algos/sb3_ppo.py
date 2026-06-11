@@ -19,6 +19,7 @@ from .base import BaseAgent
 class SB3PPOAgent(BaseAgent):
     name = "ppo"
     trains_itself = True
+    supports_image_obs = True   # 图像观测自动切 CnnPolicy
 
     # 与之前手写版调优一致的超参
     HP = dict(learning_rate=3e-4, n_steps=2048, batch_size=256, n_epochs=10,
@@ -58,9 +59,14 @@ class SB3PPOAgent(BaseAgent):
         if self.model is not None:                     # 续练
             self.model.set_env(venv)
         else:
-            self.model = PPO("MlpPolicy", venv, device=self.device,
+            # 图像观测(如 mario 的 4x84x84)用 CNN 策略,SB3 自动 /255;
+            # CnnPolicy 的特征提取器(NatureCNN)后面不再需要额外 MLP 层
+            image_obs = env.obs_shape is not None
+            policy = "CnnPolicy" if image_obs else "MlpPolicy"
+            policy_kwargs = {} if image_obs else dict(self.POLICY_KWARGS)
+            self.model = PPO(policy, venv, device=self.device,
                              seed=self.seed, verbose=0,
-                             policy_kwargs=dict(self.POLICY_KWARGS),
+                             policy_kwargs=policy_kwargs,
                              **self.HP)
 
         agent = self

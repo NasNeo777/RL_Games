@@ -16,6 +16,9 @@ class BaseEnv:
     obs_dim: int = 0
     n_actions: int = 0
     max_steps: int = 500
+    # 图像观测的环境设置成 (通道, 高, 宽),观测为 uint8;
+    # 向量观测的环境保持 None(观测为 obs_dim 维 float32)
+    obs_shape: tuple = None
 
     def __init__(self):
         self.record = False

@@ -54,6 +54,9 @@ def main():
     eval_env = make_env(args.env)
     agent = make_agent(args.algo, env.obs_dim, env.n_actions,
                        device=args.device, seed=args.seed)
+    if env.obs_shape and not getattr(agent, "supports_image_obs", False):
+        raise SystemExit(f"环境 {args.env} 是图像观测,算法 {args.algo} "
+                         f"只支持向量观测;请用 --algo ppo")
 
     run_dir = ROOT / "runs" / f"{args.env}_{args.algo}"
     if args.restart and run_dir.exists():
