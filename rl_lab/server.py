@@ -92,6 +92,7 @@ def _run_demo_episode(ckpt_path, which):
         "steps": steps,
         "success": bool(info.get("success", False)),
         "swingup_seconds": info.get("swingup_seconds"),
+        "score": info.get("score"),
         "which": which,
         "algo": ckpt["algo"],
         "env": ckpt["env"],
