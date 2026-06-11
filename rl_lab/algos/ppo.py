@@ -9,10 +9,13 @@ from .base import BaseAgent, mlp
 class PPOAgent(BaseAgent):
     name = "ppo"
 
+    # gamma 0.995(视野约 10 秒):甩起→稳住→成功奖金的因果链长达数百步,
+    # 0.99 时奖金折扣到几乎不可见。ent_coef 0.003:倒立是不稳定平衡,
+    # 熵奖励太高会让策略在平衡点附近持续随机抖动,训练中体验不到长 hold。
     def __init__(self, obs_dim, n_actions, device="cpu",
-                 lr=3e-4, gamma=0.99, lam=0.95, clip=0.2,
+                 lr=3e-4, gamma=0.995, lam=0.95, clip=0.2,
                  rollout=2048, epochs=10, minibatch=256,
-                 ent_coef=0.01, vf_coef=0.5, max_grad_norm=0.5,
+                 ent_coef=0.003, vf_coef=0.5, max_grad_norm=0.5,
                  seed=None):
         super().__init__(obs_dim, n_actions, device)
         self.pi = mlp(obs_dim, n_actions, hidden=(128, 128)).to(self.device)
