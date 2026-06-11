@@ -36,6 +36,7 @@ class GymEnv(BaseEnv):
     render_every = 2          # 每隔几步抓一帧演示画面(权衡流畅度和体积)
     render_height = 512       # 高于此才缩;多数小游戏原生分辨率本就不高,保留原生
     jpeg_quality = 75
+    max_record_frames = 1500  # 演示录像上限(防超长回合把浏览器撑爆),约 100 秒
 
     def __init__(self, seed=None):
         super().__init__()
@@ -77,8 +78,9 @@ class GymEnv(BaseEnv):
             truncated = True
         info = dict(info)
         info["success"] = bool(success)
-        if self.record and (self.t % self.render_every == 0
-                            or terminated or truncated):
+        if (self.record and len(self.frames) < self.max_record_frames
+                and (self.t % self.render_every == 0
+                     or terminated or truncated)):
             self._record_frame(info)
         return (np.asarray(obs, dtype=np.float32).ravel(),
                 reward, bool(terminated), bool(truncated), info)

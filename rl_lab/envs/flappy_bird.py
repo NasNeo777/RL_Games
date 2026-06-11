@@ -6,14 +6,15 @@
 """
 from .gym_adapter import GymEnv
 
-SUCCESS_SCORE = 20
+SUCCESS_SCORE = 777
 
 
 class FlappyBirdEnv(GymEnv):
     env_id = "FlappyBird-v0"
     import_module = "flappy_bird_gymnasium"
     gym_kwargs = {"use_lidar": False}
-    max_steps = 1000
+    # 777 根管道约需 3 万步,步数上限要给够,否则永远到不了成功
+    max_steps = 40000
     success_bonus = 50.0
 
     def is_success(self, info):
