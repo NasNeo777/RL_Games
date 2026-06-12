@@ -8,37 +8,37 @@ BUDGETS = {
     "mountain_car_dqn": {
         "steps": 16_000,
         "src": "实测",
-        "rough": "约 1 分钟",
+        "rough": "1 分钟",
     },
     "tetris_dqn": {
         "steps": 570_000,
         "src": "实测",
-        "rough": "约 8 分钟",
+        "rough": "8 分钟",
     },
     "mario_ppo": {
         "steps": 4_300_000,
         "src": "实测",
-        "rough": "约一夜",
+        "rough": "一夜",
     },
     "flappy_bird_ppo": {
         "steps": 23_200_000,
         "src": "实测",
-        "rough": "约数小时",
+        "rough": "数小时",
     },
     "double_pendulum_ppo": {
         "steps": 155_000_000,
         "src": "实测",
-        "rough": "约数小时",
+        "rough": "数小时",
     },
     "snake_dqn": {
         "steps": 3_000_000,
         "src": "估算",
-        "rough": "约 2 分钟见到通关局",
+        "rough": "2 分钟",
     },
     "2048_td2048": {
         "steps": 10_000_000,
         "src": "估算",
-        "rough": "约 7 分钟开始稳定合出 2048",
+        "rough": "7 分钟",
     },
     "2048_dqn": {
         "tip": "DQN 在 2048 上极慢,强烈建议改用 --algo td2048。",
@@ -71,7 +71,7 @@ def startup_message(env_name: str, algo: str,
     pct = min(99, env_steps / budget["steps"] * 100) if env_steps else 0
     return ("进度提示: 这组配置参考要跑 "
             f"{budget['steps'] / 1000:.0f}k 步({budget['src']}),"
-            f"通常 {budget['rough']} 左右能接近练成。"
+            f"通常约 {budget['rough']}能接近练成。"
             + (f" 当前已到 {pct:.0f}% 左右。" if env_steps else ""))
 
 
@@ -99,4 +99,4 @@ def progress_message(env_name: str, algo: str, env_steps: int,
         if eta:
             return (base + f"，当前约 {rate:.0f} 步/秒，"
                     f"预计还需 {fmt_duration(eta)}。")
-    return base + f"，通常 {budget['rough']} 左右能接近练成。"
+    return base + f"，通常约 {budget['rough']}能接近练成。"
