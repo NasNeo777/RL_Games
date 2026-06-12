@@ -1,0 +1,12 @@
+# Core dependencies
+numpy==2.4.6
+torch==2.12.0
+Pillow==12.2.0
+gymnasium==1.2.3
+stable-baselines3==2.8.0
+
+# Optional game environments
+# Remove the leading "#" if you want to train/play these envs too.
+# flappy-bird-gymnasium
+# gym-super-mario-bros
+# gym==0.26.2
