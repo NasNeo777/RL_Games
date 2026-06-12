@@ -10,8 +10,11 @@
   one-hot 上是线性可分的,在连续标量上则要自己学相等性检测。
 - 4 维:四个方向当前是否可推(无效动作掩码,免得网络自己猜)
 
-动作 4 个:上 / 右 / 下 / 左。推了不改变棋盘算无效移动,小罚不刷新;
-连续 INVALID_LIMIT 次无效直接判负(防演示时死循环)。
+动作 4 个:上 / 右 / 下 / 左。选了不改变棋盘的无效方向,罚 0.1 分后
+**随机替走一个有效方向**——不能让棋盘原样不动:观测不变的话,
+确定性策略的 argmax 也不变,会原地死循环把局憋死(实测过,贪心
+评估时局局如此)。替走机制让死循环在机制上不可能发生,小罚仍在
+教网络利用观测里的掩码避开无效方向。
 
 奖励:每次合并按合并值 / 100 给分,无效移动 -0.1,无路可走 -2;
 合出 SUCCESS_TILE 视为成功,+50 并结束回合。
@@ -26,7 +29,7 @@ from .base import BaseEnv
 
 SIZE = 4
 SUCCESS_TILE = 2048
-INVALID_LIMIT = 10
+INVALID_PENALTY = -0.1
 N_CHANNELS = 16     # one-hot 档位:空 + 2^1..2^15
 MONO_W = 0.05       # 单调性塑形权重(行列按大小排开)
 CORNER_W = 0.2      # 压角塑形权重(最大数待在角落)
@@ -84,7 +87,6 @@ class Game2048Env(BaseEnv):
         self.board = np.zeros((SIZE, SIZE), dtype=np.int32)
         self.score = 0
         self.t = 0
-        self.invalid = 0
         self.new_tile = None
 
     def reset(self, seed=None):
@@ -93,7 +95,6 @@ class Game2048Env(BaseEnv):
         self.board = np.zeros((SIZE, SIZE), dtype=np.int32)
         self.score = 0
         self.t = 0
-        self.invalid = 0
         self.new_tile = None
         self._spawn()
         self._spawn()
@@ -105,31 +106,26 @@ class Game2048Env(BaseEnv):
     def step(self, action):
         d = int(action)
         self.t += 1
-        new_board, gained = _move(self.board, d)
-        moved = not np.array_equal(new_board, self.board)
+        reward = 0.0
+        mask = self._valid_mask()
+        if not mask[d]:
+            reward = INVALID_PENALTY
+            d = int(self.rng.choice(np.flatnonzero(mask)))
+
+        phi_before = self._potential()
+        self.board, gained = _move(self.board, d)
+        self.score += gained
+        self._spawn()
+        reward += gained / 100.0 + self._potential() - phi_before
 
         success = False
         dead = False
-        if not moved:
-            reward = -0.1
-            self.invalid += 1
-            self.new_tile = None
-            dead = self.invalid >= INVALID_LIMIT
-            if dead:
-                reward = -2.0
-        else:
-            phi_before = self._potential()
-            self.invalid = 0
-            self.board = new_board
-            self.score += gained
-            self._spawn()
-            reward = gained / 100.0 + self._potential() - phi_before
-            if int(self.board.max()) >= SUCCESS_TILE:
-                success = True
-                reward += 50.0
-            elif not any(self._valid_mask()):   # 棋满且无可合并
-                dead = True
-                reward -= 2.0
+        if int(self.board.max()) >= SUCCESS_TILE:
+            success = True
+            reward += 50.0
+        elif not any(self._valid_mask()):   # 棋满且无可合并
+            dead = True
+            reward -= 2.0
 
         terminated = dead or success
         truncated = (not terminated) and self.t >= self.max_steps
