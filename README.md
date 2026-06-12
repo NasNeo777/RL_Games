@@ -51,7 +51,7 @@
 <h3 align="center">🧱 俄罗斯方块</h3>
 <p align="center"><i>7-bag 随机发牌,学会铺平少留洞</i></p>
 <p align="center"><code>./start.sh --env tetris --algo dqn</code></p>
-<p align="center">🏆 消满 40 行(经典竞速) &nbsp;·&nbsp; ⏱️ <b>约 10 分钟</b>单局消 15+ 行<br>🎲 随机性:方块序列 &nbsp;·&nbsp; 🧠 动作 = 选旋转 × 落点,一步落一块</p>
+<p align="center">🏆 消满 40 行(经典竞速) &nbsp;·&nbsp; ⏱️ <b>约 8 分钟练成</b>(实测 57 万步)<br>🎲 随机性:方块序列 &nbsp;·&nbsp; 🧠 动作 = 选旋转 × 落点,一步落一块</p>
 
 </td>
 <td width="50%" valign="top">
@@ -59,7 +59,7 @@
 <h3 align="center">🐦 Flappy Bird</h3>
 <p align="center"><i>就是那个让全世界摔手机的游戏</i></p>
 <p align="center"><code>./start.sh --env flappy_bird --algo dqn</code></p>
-<p align="center">🏆 连过 777 根管道(≈永生) &nbsp;·&nbsp; ⏱️ 中等<br>🎲 随机性:管道高度 &nbsp;·&nbsp; 📦 需装:<code>.venv/bin/pip install flappy-bird-gymnasium</code></p>
+<p align="center">🏆 连过 777 根管道(≈永生) &nbsp;·&nbsp; ⏱️ 几分钟像样,练成要挂机(PPO 实测 2300 万步)<br>🎲 随机性:管道高度 &nbsp;·&nbsp; 📦 需装:<code>.venv/bin/pip install flappy-bird-gymnasium</code></p>
 
 </td>
 </tr>
@@ -69,7 +69,7 @@
 <h3 align="center">⛰️ 小车爬山</h3>
 <p align="center"><i>引擎不够劲,得先左右荡秋千攒动能</i></p>
 <p align="center"><code>./start.sh --env mountain_car --algo dqn</code></p>
-<p align="center">🏆 登顶(位置 ≥ 0.5) &nbsp;·&nbsp; ⏱️ 快<br>📐 经典控制问题,MountainCar-v0 同款物理</p>
+<p align="center">🏆 登顶(位置 ≥ 0.5) &nbsp;·&nbsp; ⏱️ <b>约 1 分钟练成</b>(实测 1.6 万步)<br>📐 经典控制问题,MountainCar-v0 同款物理</p>
 
 </td>
 <td width="50%" valign="top">
@@ -77,7 +77,7 @@
 <h3 align="center">🎯 二阶摆(默认)</h3>
 <p align="center"><i>甩起来,倒立,稳住 5 秒——欠驱动控制的硬骨头</i></p>
 <p align="center"><code>./start.sh</code></p>
-<p align="center">🏆 倒立区连续稳定 5 秒 &nbsp;·&nbsp; ⏱️ 中等<br>📐 Acrobot 同款动力学(RK4 积分),本项目的元老环境</p>
+<p align="center">🏆 倒立区连续稳定 5 秒 &nbsp;·&nbsp; ⏱️ 硬骨头:挂机数小时(实测 1.5 亿步)<br>📐 Acrobot 同款动力学(RK4 积分),本项目的元老环境</p>
 
 </td>
 </tr>
@@ -87,7 +87,7 @@
 <h3 align="center">🍄 超级马里奥 1-1</h3>
 <p align="center"><i>AI 直接看像素玩马里奥,硬核玩家区</i></p>
 <p align="center"><code>./start.sh --env mario</code></p>
-<p align="center">🏆 拿到关底旗子 &nbsp;·&nbsp; ⏱️ <b>数小时</b>,建议挂机<br>🖼️ 图像观测,只支持 PPO(自动切 CNN)<br>📦 需装:<code>.venv/bin/pip install gym-super-mario-bros gym</code></p>
+<p align="center">🏆 拿到关底旗子 &nbsp;·&nbsp; ⏱️ <b>约一夜</b>(实测 427 万步),建议挂机<br>🖼️ 图像观测,只支持 PPO(自动切 CNN)<br>📦 需装:<code>.venv/bin/pip install gym-super-mario-bros gym</code></p>
 
 </td>
 <td width="50%" valign="top">
@@ -114,6 +114,7 @@
 | 🥇 最优 / 最新切换 | `best.pt`(历史最高分)vs `latest.pt`(刚出炉的) |
 | ♻️ 跑完刷新模型 | 每播完一局自动加载新检查点——训练进步实时可见 |
 | 📈 训练曲线 | 评估回报 + 成功率,每 5 秒刷新 |
+| 🎯 练成进度条 | 按本仓库实测的步数预算估算进度和剩余时间 |
 | 🔀 多 run 切换 | 同时训练多个游戏/算法,下拉框随意切换围观 |
 
 ---

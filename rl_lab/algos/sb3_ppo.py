@@ -15,6 +15,7 @@ from collections import deque
 from functools import partial
 
 from .base import BaseAgent
+from ..progress import progress_message
 
 
 def _make_sb3_env(env_name, seed):
@@ -183,6 +184,12 @@ class SB3PPOAgent(BaseAgent):
                       + (f" | 摆起 {avg_swingup}s" if avg_swingup else "")
                       + (" [BEST]" if is_best else "")
                       + ("  ✅ 已解决" if self.solved else ""))
+                msg = progress_message(args.env, agent.name,
+                                       record["env_steps"],
+                                       time.time() - started, env_steps0,
+                                       solved=self.solved)
+                if msg:
+                    print(msg)
                 if self.solved and not args.forever:
                     print(f"评估成功率达到 {args.solve_rate:.0%},训练完成。"
                           f"最优模型: {best}")

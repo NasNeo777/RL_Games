@@ -37,6 +37,12 @@
   h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted);
        font-weight: 600; }
   #demoInfo { color: var(--muted); font-size: 13px; min-height: 20px; }
+  .pbar { height: 10px; border-radius: 5px; background: #232d38;
+          overflow: hidden; margin: 4px 0 8px; }
+  .pbar > div { height: 100%; border-radius: 5px; transition: width .6s;
+                background: linear-gradient(90deg, #4fc3f7, #66bb6a); }
+  #progress .note { color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+  #progress b { color: var(--text); }
 </style>
 </head>
 <body>
@@ -68,6 +74,8 @@
   <div class="panel stats">
     <h2>训练状态(每 5 秒刷新)</h2>
     <table id="metaTable"></table>
+    <h2 style="margin-top:16px">🎯 离练成还有多远</h2>
+    <div id="progress"></div>
     <h2 style="margin-top:16px">评估回报曲线</h2>
     <canvas id="curve" width="520" height="220"></canvas>
     <h2 style="margin-top:16px">成功率曲线</h2>
@@ -580,6 +588,73 @@ async function loadDemo(replay = false, auto = false) {
   } catch (e) { $("demoInfo").textContent = "⚠ " + e; return false; }
 }
 
+/* ===== 训练进度估计 =====
+   "练成" = 评估成功率 100%(train.py 的 solved)。预算步数来自本仓库
+   真实跑出来的数据(src=实测)或文献/外推(src=估算),键是 env_algo。 */
+const BUDGETS = {
+  mountain_car_dqn:    { steps: 16_000,      src: "实测" },
+  tetris_dqn:          { steps: 570_000,     src: "实测" },
+  mario_ppo:           { steps: 4_300_000,   src: "实测" },
+  flappy_bird_ppo:     { steps: 23_200_000,  src: "实测" },
+  double_pendulum_ppo: { steps: 155_000_000, src: "实测" },
+  snake_dqn:           { steps: 3_000_000,   src: "估算" },
+  "2048_td2048":       { steps: 10_000_000,  src: "估算" },
+  "2048_dqn":  { tip: "⚠️ DQN 在 2048 上极慢(百万步仍千分级),强烈建议 --algo td2048,几分钟就能合出 2048" },
+  flappy_bird_dqn: { tip: "DQN 几分钟能学个大概,但 777 根管道的练成标准未见 DQN 达成过;要挂机练成请用 --algo ppo(实测约 2300 万步)" },
+};
+
+function fmtDuration(sec) {
+  if (sec < 90) return Math.max(1, Math.round(sec)) + " 秒";
+  if (sec < 5400) return Math.round(sec / 60) + " 分钟";
+  return (sec / 3600).toFixed(1) + " 小时";
+}
+
+// 用 metrics 尾部的相邻记录估算训练速度(步/秒);
+// 跳过断点续练造成的时间回卷(dt<=0)
+function trainRate(recs) {
+  let ds = 0, dt = 0, used = 0;
+  for (let i = recs.length - 1; i > 0 && used < 8; i--) {
+    const a = recs[i - 1], b = recs[i];
+    const t = (b.time ?? 0) - (a.time ?? 0), s = b.env_steps - a.env_steps;
+    if (t > 0 && s > 0) { ds += s; dt += t; used++; }
+  }
+  return dt > 0 ? ds / dt : null;
+}
+
+function renderProgress(meta, recs) {
+  const el = $("progress");
+  if (!meta) { el.innerHTML = '<div class="note">等待训练数据…</div>'; return; }
+  if (meta.solved) {
+    el.innerHTML = '<div class="pbar"><div style="width:100%"></div></div>'
+      + '<div class="note">✅ <b>已练成</b>(评估成功率 100%)。'
+      + '加 --forever 可以继续打磨。</div>';
+    return;
+  }
+  const b = BUDGETS[`${meta.env}_${meta.algo}`];
+  if (b && b.tip) {
+    el.innerHTML = `<div class="note">${b.tip}</div>`;
+    return;
+  }
+  if (!b) {
+    el.innerHTML = '<div class="note">这个环境/算法组合还没有参考数据,'
+      + '盯下方成功率曲线就好。</div>';
+    return;
+  }
+  const steps = meta.env_steps ?? 0;
+  const pct = Math.min(99, steps / b.steps * 100);
+  const rate = recs && trainRate(recs);
+  let eta = "";
+  if (steps >= b.steps) {
+    eta = "已超出参考步数——任务有运气成分,继续挂机或看成功率曲线。";
+  } else if (rate) {
+    eta = `按当前 <b>${Math.round(rate)}</b> 步/秒,预计还需 `
+        + `<b>~${fmtDuration((b.steps - steps) / rate)}</b>`;
+  }
+  el.innerHTML = `<div class="pbar"><div style="width:${pct}%"></div></div>`
+    + `<div class="note">${pct.toFixed(0)}% · 已训 ${(steps / 1000).toFixed(0)}k`
+    + ` / 参考 ${(b.steps / 1000).toFixed(0)}k 步(${b.src})。${eta}</div>`;
+}
+
 /* ===== 训练状态与曲线 ===== */
 function drawCurve(cv, recs, key, color, fmt) {
   const ctx = cv.getContext("2d"), W = cv.width, H = cv.height;
@@ -642,6 +717,7 @@ async function refreshStats() {
     if (state.run) {
       const recs = await (await fetch(
         `/api/metrics?run=${encodeURIComponent(state.run)}`)).json();
+      renderProgress(meta, recs);
       drawCurve($("curve"), recs, "eval_return", "#4fc3f7",
                 v => v.toFixed(0));
       drawCurve($("rate"), recs, "success_rate", "#66bb6a",

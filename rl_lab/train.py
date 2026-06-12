@@ -27,6 +27,7 @@ from pathlib import Path
 from .algos import ALGOS, make_agent
 from .envs import ENVS, make_env
 from .evaluation import evaluate
+from .progress import progress_message, startup_message
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -100,6 +101,9 @@ def main():
 
     print(f"{'继续训练' if resumed else '开始训练'}: "
           f"env={args.env} algo={args.algo} -> {run_dir}")
+    msg = startup_message(args.env, args.algo, env_steps=env_steps)
+    if msg:
+        print(msg)
 
     # SB3 这类算法自带训练循环,评估/检查点/metrics 由其回调按同一格式落盘
     if getattr(agent, "trains_itself", False):
@@ -109,6 +113,7 @@ def main():
         return
 
     started = time.time()
+    session_env_steps0 = env_steps
     solved = False
     recent_returns = deque(maxlen=20)
     obs = env.reset(seed=args.seed)
@@ -172,6 +177,11 @@ def main():
               f"成功率 {success_rate:.0%}"
               + (f" | 摆起 {avg_swingup}s" if avg_swingup else "")
               + flag + ("  ✅ 已解决" if solved else ""))
+        msg = progress_message(args.env, args.algo, env_steps,
+                               time.time() - started, session_env_steps0,
+                               solved=solved)
+        if msg:
+            print(msg)
 
         if solved and not args.forever:
             print(f"评估成功率达到 {args.solve_rate:.0%},训练完成。"
