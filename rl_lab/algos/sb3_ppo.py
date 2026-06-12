@@ -44,8 +44,9 @@ class SB3PPOAgent(BaseAgent):
                     ent_coef=0.1, vf_coef=0.5, max_grad_norm=0.8,
                     target_kl=0.03)
     # 熵系数从 HP_IMAGE["ent_coef"] 线性衰减到 end(按累计环境步数),
-    # 前期多探索,后期降噪声帮收敛
-    ENT_DECAY = dict(end=0.005, steps=2_000_000)
+    # 前期多探索,后期降噪声帮收敛;end 不要太低,否则后期会
+    # 探索不出关卡后段的难点(如 1-1 的悬崖跳)
+    ENT_DECAY = dict(end=0.02, steps=2_000_000)
     N_ENVS_IMAGE = 8            # 图像环境默认并行数(--n-envs 可覆盖)
 
     def __init__(self, obs_dim, n_actions, device="cpu", seed=None):
