@@ -48,11 +48,18 @@ Ctrl+C 同时停掉两者;训练自然结束后服务器会留着供演示。也
 | `mountain_car` | 小车爬山(MountainCar-v0 物理) | 登顶(位置 ≥ 0.5) |
 | `flappy_bird` | Flappy Bird([flappy-bird-gymnasium](https://github.com/markub3327/flappy-bird-gymnasium) 集成包) | 连过 20 根管道 |
 | `mario` | 超级马里奥世界 1-1([gym-super-mario-bros](https://github.com/Kautenja/gym-super-mario-bros) 集成包,图像观测) | 拿到关底旗子 |
+| `snake` | 贪吃蛇(纯 Python 自制,食物位置随机刷新) | 吃到 30 个食物 |
 
 ```bash
 ./start.sh --env flappy_bird --algo dqn
 ./start.sh --env mario              # 图像观测,只支持 ppo(自动用 CNN 策略)
+./start.sh --env snake --algo dqn   # 带随机性:每局食物序列都不同
 ```
+
+`snake` 是本项目第一个**全程带随机性**的环境:食物每次被吃掉后随机
+刷新位置,agent 无法靠背动作序列通关,只能学出泛化策略。观测 10 维
+(以蛇头朝向为参考系:三个方向的障碍距离、食物相对偏移、朝向、长度),
+动作是相对转向(直行/左转/右转),实现见 `envs/snake.py`。
 
 `mario` 是本项目第一个**图像观测**环境:agent 不直接看 240x256 RGB
 原始画面,观测经过跳帧 4(相邻两帧取 max 去闪烁)→ 灰度化 →

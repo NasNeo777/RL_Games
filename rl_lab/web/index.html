@@ -154,6 +154,76 @@ const RENDERERS = {
     }
   },
 
+  snake(ctx, W, H, spec, frames, fIdx, frac) {
+    const f = frames[fIdx];
+    const g = spec.grid;
+    const size = Math.min(W, H) - 16;
+    const cell = size / g;
+    const ox = (W - size) / 2, oy = (H - size) / 2;
+    ctx.clearRect(0, 0, W, H);
+    // 棋盘
+    for (let y = 0; y < g; y++)
+      for (let x = 0; x < g; x++) {
+        ctx.fillStyle = (x + y) % 2 ? "#131b24" : "#0f161e";
+        ctx.fillRect(ox + x * cell, oy + y * cell, cell, cell);
+      }
+    ctx.strokeStyle = "#2a3441"; ctx.lineWidth = 2;
+    ctx.strokeRect(ox, oy, size, size);
+    // 食物(苹果 + 叶子)
+    if (f.f) {
+      const fx = ox + (f.f[0] + 0.5) * cell, fy = oy + (f.f[1] + 0.5) * cell;
+      ctx.fillStyle = "#ef5350";
+      ctx.beginPath(); ctx.arc(fx, fy + cell * 0.04, cell * 0.32, 0, 7); ctx.fill();
+      ctx.strokeStyle = "#66bb6a"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(fx, fy - cell * 0.24);
+      ctx.quadraticCurveTo(fx + cell * 0.18, fy - cell * 0.42,
+                           fx + cell * 0.26, fy - cell * 0.3);
+      ctx.stroke();
+    }
+    // 蛇身:从尾到头画,头最亮;死亡时头变红
+    const n = f.s.length;
+    for (let i = n - 1; i >= 0; i--) {
+      const [x, y] = f.s[i];
+      const t = 1 - i / Math.max(n - 1, 1);          // 尾 0 → 头 1
+      ctx.fillStyle = i === 0
+        ? (f.dead ? "#ef5350" : "#aee571")
+        : `rgb(${40 + 30 * t}, ${130 + 60 * t}, ${70 + 30 * t})`;
+      const pad = cell * (i === 0 ? 0.06 : 0.1);
+      const r = cell * 0.22;
+      ctx.beginPath();
+      ctx.roundRect(ox + x * cell + pad, oy + y * cell + pad,
+                    cell - 2 * pad, cell - 2 * pad, r);
+      ctx.fill();
+    }
+    // 眼睛:按头的移动方向摆
+    if (n > 1 && !f.dead) {
+      const [hx, hy] = f.s[0], [bx, by] = f.s[1];
+      const dx = Math.sign(hx - bx), dy = Math.sign(hy - by);
+      const cx = ox + (hx + 0.5) * cell, cy = oy + (hy + 0.5) * cell;
+      // 垂直于前进方向错开两只眼,再往前进方向偏一点
+      const px = -dy, py = dx;
+      ctx.fillStyle = "#0a0e12";
+      for (const s of [-1, 1]) {
+        ctx.beginPath();
+        ctx.arc(cx + (dx * 0.18 + s * px * 0.16) * cell,
+                cy + (dy * 0.18 + s * py * 0.16) * cell,
+                cell * 0.07, 0, 7);
+        ctx.fill();
+      }
+    }
+    // 得分(画在棋盘内,加阴影保证压着蛇身也可读)
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,.9)"; ctx.shadowBlur = 6;
+    ctx.fillStyle = "#e6edf3";
+    ctx.font = "bold 16px -apple-system, 'PingFang SC', sans-serif";
+    ctx.fillText(`得分 ${f.score} / ${spec.goal}`, ox + 8, oy + 22);
+    if (f.dead) {
+      ctx.fillStyle = "#ef5350"; ctx.font = "bold 14px sans-serif";
+      ctx.fillText("✕ 死亡", ox + size - 64, oy + 22);
+    }
+    ctx.restore();
+  },
+
   mountain_car(ctx, W, H, spec, frames, fIdx, frac) {
     const a = frames[fIdx], b = frames[Math.min(fIdx + 1, frames.length - 1)];
     const x = a.x + (b.x - a.x) * frac;

@@ -3,12 +3,14 @@ from .double_pendulum import DoublePendulumEnv
 from .flappy_bird import FlappyBirdEnv
 from .mario import MarioEnv
 from .mountain_car import MountainCarEnv
+from .snake import SnakeEnv
 
 ENVS = {
     "double_pendulum": DoublePendulumEnv,
     "flappy_bird": FlappyBirdEnv,
     "mario": MarioEnv,
     "mountain_car": MountainCarEnv,
+    "snake": SnakeEnv,
 }
 
 
