@@ -224,6 +224,101 @@ const RENDERERS = {
     ctx.restore();
   },
 
+  "2048"(ctx, W, H, spec, frames, fIdx, frac) {
+    const f = frames[fIdx];
+    const g = spec.size;
+    ctx.clearRect(0, 0, W, H);
+    const size = Math.min(W, H) - 50;
+    const ox = (W - size) / 2, oy = (H - size + 30) / 2;
+    // 棋盘底
+    ctx.fillStyle = "#bbada0";
+    ctx.beginPath(); ctx.roundRect(ox, oy, size, size, 8); ctx.fill();
+    const gap = size * 0.025, cell = (size - gap * (g + 1)) / g;
+    const TILE = { 2:"#eee4da", 4:"#ede0c8", 8:"#f2b179", 16:"#f59563",
+                   32:"#f67c5f", 64:"#f65e3b", 128:"#edcf72", 256:"#edcc61",
+                   512:"#edc850", 1024:"#edc53f", 2048:"#edc22e" };
+    let maxTile = 0;
+    for (let y = 0; y < g; y++)
+      for (let x = 0; x < g; x++) {
+        const v = f.b[y][x];
+        maxTile = Math.max(maxTile, v);
+        const cx = ox + gap + x * (cell + gap), cy = oy + gap + y * (cell + gap);
+        ctx.fillStyle = "#cdc1b4";
+        ctx.beginPath(); ctx.roundRect(cx, cy, cell, cell, 5); ctx.fill();
+        if (!v) continue;
+        // 新刷出来的数字做个"弹出"动画
+        const isNew = f.n && f.n[0] === x && f.n[1] === y;
+        const s = isNew ? cell * (0.55 + 0.45 * Math.min(1, frac / 0.5)) : cell;
+        const off = (cell - s) / 2;
+        ctx.fillStyle = TILE[v] || "#3c3a32";
+        ctx.beginPath(); ctx.roundRect(cx + off, cy + off, s, s, 5); ctx.fill();
+        ctx.fillStyle = v <= 4 ? "#776e65" : "#f9f6f2";
+        const fs = v < 100 ? 0.45 : v < 1000 ? 0.36 : 0.28;
+        ctx.font = `bold ${Math.round(s * fs)}px -apple-system, sans-serif`;
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(v, cx + cell / 2, cy + cell / 2 + 1);
+      }
+    ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "#e6edf3";
+    ctx.font = "bold 16px -apple-system, 'PingFang SC', sans-serif";
+    ctx.fillText(`得分 ${f.score} · 最大 ${maxTile} / ${spec.goal}`, ox, oy - 10);
+    if (f.dead) {
+      ctx.fillStyle = "#ef5350"; ctx.font = "bold 14px sans-serif";
+      ctx.textAlign = "right";
+      ctx.fillText("✕ 无路可走", ox + size, oy - 10);
+      ctx.textAlign = "left";
+    }
+  },
+
+  tetris(ctx, W, H, spec, frames, fIdx, frac) {
+    const f = frames[fIdx];
+    ctx.clearRect(0, 0, W, H);
+    const cell = Math.floor((H - 24) / spec.h);
+    const bw = cell * spec.w, bh = cell * spec.h;
+    const ox = Math.round((W - bw) / 2) - 36, oy = Math.round((H - bh) / 2);
+    const COLORS = ["", "#4fc3f7", "#ffd54f", "#ba68c8", "#81c784",
+                    "#e57373", "#7986cb", "#ffb74d"];
+    // 棋盘
+    ctx.fillStyle = "#0a0e12";
+    ctx.fillRect(ox, oy, bw, bh);
+    ctx.strokeStyle = "#2a3441"; ctx.lineWidth = 2;
+    ctx.strokeRect(ox - 1, oy - 1, bw + 2, bh + 2);
+    const placed = new Set((f.p || []).map(([x, y]) => x + "," + y));
+    for (let y = 0; y < spec.h; y++)
+      for (let x = 0; x < spec.w; x++) {
+        const v = +f.b[y][x];
+        if (!v) continue;
+        ctx.fillStyle = COLORS[v];
+        ctx.fillRect(ox + x * cell + 1, oy + y * cell + 1, cell - 2, cell - 2);
+        if (placed.has(x + "," + y)) {   // 刚落下的方块描白边
+          ctx.strokeStyle = "#e6edf3"; ctx.lineWidth = 1.5;
+          ctx.strokeRect(ox + x * cell + 1.5, oy + y * cell + 1.5,
+                         cell - 3, cell - 3);
+        }
+      }
+    // 消行闪白(本帧棋盘是消行前的状态,白光随 frac 淡出)
+    if (f.clr && f.clr.length) {
+      ctx.fillStyle = `rgba(230,237,243,${0.85 * (1 - frac)})`;
+      for (const y of f.clr)
+        ctx.fillRect(ox, oy + y * cell, bw, cell);
+    }
+    // 侧栏:行数 + 下一块预览
+    const sx = ox + bw + 18;
+    ctx.fillStyle = "#e6edf3";
+    ctx.font = "bold 16px -apple-system, 'PingFang SC', sans-serif";
+    ctx.fillText(`${f.lines} / ${spec.goal} 行`, sx, oy + 18);
+    ctx.fillStyle = "#8b98a5"; ctx.font = "12px sans-serif";
+    ctx.fillText("下一块", sx, oy + 44);
+    const nc = cell * 0.7;
+    ctx.fillStyle = COLORS[f.next];
+    for (const [x, y] of spec.pieces[f.next] || [])
+      ctx.fillRect(sx + x * nc, oy + 52 + y * nc, nc - 1, nc - 1);
+    if (f.dead) {
+      ctx.fillStyle = "#ef5350"; ctx.font = "bold 14px sans-serif";
+      ctx.fillText("✕ 堆到顶了", sx, oy + bh - 8);
+    }
+  },
+
   mountain_car(ctx, W, H, spec, frames, fIdx, frac) {
     const a = frames[fIdx], b = frames[Math.min(fIdx + 1, frames.length - 1)];
     const x = a.x + (b.x - a.x) * frac;

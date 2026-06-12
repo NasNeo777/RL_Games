@@ -49,17 +49,29 @@ Ctrl+C 同时停掉两者;训练自然结束后服务器会留着供演示。也
 | `flappy_bird` | Flappy Bird([flappy-bird-gymnasium](https://github.com/markub3327/flappy-bird-gymnasium) 集成包) | 连过 20 根管道 |
 | `mario` | 超级马里奥世界 1-1([gym-super-mario-bros](https://github.com/Kautenja/gym-super-mario-bros) 集成包,图像观测) | 拿到关底旗子 |
 | `snake` | 贪吃蛇(纯 Python 自制,食物位置随机刷新) | 吃到 30 个食物 |
+| `2048` | 2048(纯 Python 自制,新数字随机刷新) | 合出 2048 |
+| `tetris` | 俄罗斯方块(纯 Python 自制,7-bag 随机发牌) | 消满 40 行 |
 
 ```bash
 ./start.sh --env flappy_bird --algo dqn
 ./start.sh --env mario              # 图像观测,只支持 ppo(自动用 CNN 策略)
 ./start.sh --env snake --algo dqn   # 带随机性:每局食物序列都不同
+./start.sh --env 2048 --algo dqn
+./start.sh --env tetris --algo dqn
 ```
 
-`snake` 是本项目第一个**全程带随机性**的环境:食物每次被吃掉后随机
-刷新位置,agent 无法靠背动作序列通关,只能学出泛化策略。观测 10 维
-(以蛇头朝向为参考系:三个方向的障碍距离、食物相对偏移、朝向、长度),
-动作是相对转向(直行/左转/右转),实现见 `envs/snake.py`。
+`snake` / `2048` / `tetris` 是三个**全程带随机性**的自制环境(零依赖,
+实现见 `envs/snake.py`、`envs/game_2048.py`、`envs/tetris.py`),agent
+无法靠背动作序列通关,只能学出泛化策略:
+
+- `snake`:食物每次被吃掉后随机刷新位置。观测 10 维(以蛇头朝向为
+  参考系:三方向障碍距离、食物相对偏移、朝向、长度),动作是相对转向
+  (直行/左转/右转)。
+- `2048`:每次有效移动后在随机空格刷新数字(90% 是 2、10% 是 4)。
+  观测 20 维(16 格 log2 值 + 4 个方向的有效动作掩码),动作 4 个方向。
+- `tetris`:方块按 7-bag 随机发牌。为了让 MLP 学得动,动作空间用经典
+  的"落点选择"方案(旋转 4 x 落点列 10 = 40 个动作,一步落一块),
+  观测 34 维(每列高度、每列洞数、当前块和下一块的 one-hot)。
 
 `mario` 是本项目第一个**图像观测**环境:agent 不直接看 240x256 RGB
 原始画面,观测经过跳帧 4(相邻两帧取 max 去闪烁)→ 灰度化 →

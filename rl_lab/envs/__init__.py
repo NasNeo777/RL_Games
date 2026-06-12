@@ -1,16 +1,20 @@
 """环境注册表。新游戏在这里登记即可被 train.py / server.py 使用。"""
 from .double_pendulum import DoublePendulumEnv
 from .flappy_bird import FlappyBirdEnv
+from .game_2048 import Game2048Env
 from .mario import MarioEnv
 from .mountain_car import MountainCarEnv
 from .snake import SnakeEnv
+from .tetris import TetrisEnv
 
 ENVS = {
+    "2048": Game2048Env,
     "double_pendulum": DoublePendulumEnv,
     "flappy_bird": FlappyBirdEnv,
     "mario": MarioEnv,
     "mountain_car": MountainCarEnv,
     "snake": SnakeEnv,
+    "tetris": TetrisEnv,
 }
 
 
