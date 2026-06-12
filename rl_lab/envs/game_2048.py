@@ -4,8 +4,10 @@
 在随机空格刷一个新数字(90% 是 2,10% 是 4)—— 这是随机性来源:
 同一套动作每局结果都不同,agent 只能学"怎么把大数往角落攒"的策略。
 
-观测 20 维(均归一化):
-- 16 维:每格数字的 log2 / 16(空格为 0)
+观测 260 维:
+- 256 维:每格 one-hot(16 档:空、2、4、…、32768)。比 log 标量
+  好学得多——"两格相等"、"这行递增"这类模式判断对 MLP 来说在
+  one-hot 上是线性可分的,在连续标量上则要自己学相等性检测。
 - 4 维:四个方向当前是否可推(无效动作掩码,免得网络自己猜)
 
 动作 4 个:上 / 右 / 下 / 左。推了不改变棋盘算无效移动,小罚不刷新;
@@ -13,6 +15,10 @@
 
 奖励:每次合并按合并值 / 100 给分,无效移动 -0.1,无路可走 -2;
 合出 SUCCESS_TILE 视为成功,+50 并结束回合。
+另加**势函数塑形** ΔΦ:Φ = 单调性 + 压角,把"维持棋盘结构"这种
+几百步后才兑现的价值折现成每步小奖励——不塑形的话,贪心地见合就合
+每步都有分拿,但会毁掉棋盘结构,agent 很难自己越过这个局部最优。
+差分形式(只算 Φ 的变化量)基本不改变最优策略,只是加快收敛。
 """
 import numpy as np
 
@@ -21,6 +27,9 @@ from .base import BaseEnv
 SIZE = 4
 SUCCESS_TILE = 2048
 INVALID_LIMIT = 10
+N_CHANNELS = 16     # one-hot 档位:空 + 2^1..2^15
+MONO_W = 0.05       # 单调性塑形权重(行列按大小排开)
+CORNER_W = 0.2      # 压角塑形权重(最大数待在角落)
 # 方向编号: 0 上, 1 右, 2 下, 3 左
 
 
@@ -65,7 +74,7 @@ def _move(board, d):
 
 
 class Game2048Env(BaseEnv):
-    obs_dim = SIZE * SIZE + 4
+    obs_dim = SIZE * SIZE * N_CHANNELS + 4
     n_actions = 4
     max_steps = 1500
 
@@ -109,11 +118,12 @@ class Game2048Env(BaseEnv):
             if dead:
                 reward = -2.0
         else:
+            phi_before = self._potential()
             self.invalid = 0
             self.board = new_board
             self.score += gained
-            reward = gained / 100.0
             self._spawn()
+            reward = gained / 100.0 + self._potential() - phi_before
             if int(self.board.max()) >= SUCCESS_TILE:
                 success = True
                 reward += 50.0
@@ -142,11 +152,30 @@ class Game2048Env(BaseEnv):
         return [not np.array_equal(_move(self.board, d)[0], self.board)
                 for d in range(4)]
 
+    def _potential(self):
+        """棋盘结构势函数:单调性 + 最大数压角,供差分塑形用。"""
+        logs = np.where(self.board > 0,
+                        np.log2(np.maximum(self.board, 1)), 0.0)
+        # 单调性:每行每列,完全单调时 = 整条线的总变差,锯齿状趋近 0
+        mono = 0.0
+        for line in list(logs) + list(logs.T):
+            d = np.diff(line)
+            incr = d[d > 0].sum()
+            decr = -d[d < 0].sum()
+            mono += abs(incr - decr)
+        # 压角:最大数待在四角之一才给,数越大给越多
+        top = logs.max()
+        corners = (logs[0, 0], logs[0, -1], logs[-1, 0], logs[-1, -1])
+        corner = top if top > 0 and top in corners else 0.0
+        return MONO_W * mono + CORNER_W * corner
+
     def _obs(self):
-        cells = np.where(self.board > 0, np.log2(np.maximum(self.board, 1)),
-                         0.0) / 16.0
+        cells = np.zeros((SIZE * SIZE, N_CHANNELS), dtype=np.float32)
+        idx = np.where(self.board > 0,
+                       np.log2(np.maximum(self.board, 1)), 0).astype(int)
+        cells[np.arange(SIZE * SIZE), idx.ravel()] = 1.0
         mask = np.array(self._valid_mask(), dtype=np.float32)
-        return np.concatenate([cells.ravel(), mask]).astype(np.float32)
+        return np.concatenate([cells.ravel(), mask])
 
     def _record_frame(self, dead):
         self.frames.append({
