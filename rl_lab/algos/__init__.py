@@ -2,11 +2,13 @@
 from .dqn import DQNAgent
 from .ppo import PPOAgent
 from .sb3_ppo import SB3PPOAgent
+from .td2048 import TD2048Agent
 
 ALGOS = {
     "dqn": DQNAgent,
     "ppo": SB3PPOAgent,        # PPO 用 Stable-Baselines3 实现
     "ppo_custom": PPOAgent,    # 旧的手写版,保留以兼容历史检查点
+    "td2048": TD2048Agent,     # 2048 专用 afterstate TD + N-tuple 查表
 }
 
 
