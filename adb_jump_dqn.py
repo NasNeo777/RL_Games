@@ -179,6 +179,12 @@ class RealJumpEnv:
             return self.press_min
         return int(round(self.press_min + action / (self.levels - 1) * (self.press_max - self.press_min)))
 
+    # 线性经验公式 press≈coef×距离 → 最接近的动作档(暖启动探索的中心)
+    def linear_action(self, dist_px: float, coef: float) -> int:
+        press = coef * dist_px
+        frac = (press - self.press_min) / max(1, self.press_max - self.press_min)
+        return int(round(float(np.clip(frac, 0.0, 1.0)) * (self.levels - 1)))
+
     def _detect(self, retries=3, delay=0.18):
         """多试几次拿到 (piece, target),容忍偶发漏检。"""
         last_piece = last_target = None
@@ -223,11 +229,10 @@ class RealJumpEnv:
         # 摔死判定:棋子检测不到,或屏幕分数归零(比上一次小)
         cur_score = self._read_score(arr, default=None) if arr is not None else None
         died = piece is None or (cur_score is not None and cur_score <= self.prev_score)
-        print(f"cur_score {cur_score}    prev_score {self.prev_score}")
+        info = {"press_ms": press_ms, "cur_score": cur_score}
         if died:
-            print("死了")
-            return np.zeros(self.obs_dim, np.float32), -self.death_penalty, True, False, {"died": True}
-        print("没死")
+            return np.zeros(self.obs_dim, np.float32), -self.death_penalty, True, False, {**info, "died": True}
+
         # 存活:奖励 = 屏幕分数增量;读不到分数则记 +1(存活计数)
         if self.score_reader and self.score_reader.ready and cur_score is not None:
             reward = float(max(0, cur_score - self.prev_score))
@@ -235,32 +240,50 @@ class RealJumpEnv:
         else:
             reward = 1.0
             self.prev_score += 1
+        info["reward"] = reward
 
         if target is None:                       # 还活着但下一块台子还没出现
-            return np.zeros(self.obs_dim, np.float32), reward, False, True, {"no_target": True}
-        return self._obs(piece, target), reward, False, False, {"score": self.prev_score}
+            return np.zeros(self.obs_dim, np.float32), reward, False, True, {**info, "no_target": True}
+        return self._obs(piece, target), reward, False, False, {**info, "score": self.prev_score}
 
 
 # --------------------------------------------------------------------------- #
 # 训练循环
 # --------------------------------------------------------------------------- #
-def train(env: RealJumpEnv, agent, episodes: int, out_dir: Path, save_every: int):
+def train(env: RealJumpEnv, agent, episodes: int, out_dir: Path, save_every: int,
+          warmup_coef: float = 1.35, warmup_window: int = 2, seed: int = 0):
     out_dir.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(seed)
     best_return = float("-inf")
+    best_score = 0
+    bar = "─" * 56
+    mode = (f"暖启动探索(coef={warmup_coef}±{warmup_window}档)"
+            if warmup_coef > 0 else "纯随机探索")
+    print(f"\n{bar}\n  真机在线 DQN · 跳一跳   →  {out_dir}\n  {mode}\n{bar}")
     for ep in range(1, episodes + 1):
         obs = env.reset()
         if obs is None:
-            print("无法进入游戏(检测不到棋子),检查 adb / 游戏是否在前台。")
+            print("⚠️  进不去游戏(检测不到棋子),检查 adb / 游戏是否在前台。")
             return
         ep_return, steps = 0.0, 0
         while True:
-            action = int(agent.act(obs))
+            dist_px = float(obs[0]) * (env.W or 1080)
+            # 探索时围绕线性估计取档(暖启动),否则用 DQN 贪心;
+            # warmup_coef<=0 时退回 agent 自带的纯随机 ε-贪心。
+            if warmup_coef > 0 and rng.random() < getattr(agent, "epsilon", 0.05):
+                base = env.linear_action(dist_px, warmup_coef)
+                action = int(np.clip(base + rng.integers(-warmup_window, warmup_window + 1),
+                                     0, env.n_actions - 1))
+            else:
+                action = int(agent.act(obs, deterministic=warmup_coef > 0))
             next_obs, reward, terminated, truncated, info = env.step(action)
             agent.observe(obs, action, reward, next_obs, terminated, truncated)
             agent.update()
             obs = next_obs
             ep_return += reward
             steps += 1
+            mark = "💀 摔死" if info.get("died") else f"✅ +{reward:.0f}"
+            print(f"     跳{steps:<3d}  距 {dist_px:4.0f}px  按 {info['press_ms']:4d}ms   {mark}")
             if truncated and not terminated:     # 没台子等一下重新观测,不算死
                 got = env.reset()
                 if got is None:
@@ -269,15 +292,18 @@ def train(env: RealJumpEnv, agent, episodes: int, out_dir: Path, save_every: int
                 continue
             if terminated or steps >= env.max_steps:
                 break
-        print(f"[ep {ep:3d}] steps={steps:3d} return={ep_return:6.1f} "
-              f"score={env.prev_score} eps={getattr(agent, 'epsilon', 0):.3f}")
-        if ep_return > best_return:
+        best_score = max(best_score, env.prev_score)
+        new_best = ep_return > best_return
+        if new_best:
             best_return = ep_return
             agent.save(out_dir / "best.pt", env_name="jump_real")
+        flag = "🏆" if new_best else "  "
+        print(f"{flag} 第 {ep:<5d} 局 │ 步 {steps:<3d} │ 本局分 {env.prev_score:<3d} │ "
+              f"回报 {ep_return:6.1f} │ ε {getattr(agent, 'epsilon', 0):.2f} │ 最高分 {best_score}")
         if ep % save_every == 0:
             agent.save(out_dir / "latest.pt", env_name="jump_real")
     agent.save(out_dir / "latest.pt", env_name="jump_real")
-    print(f"训练结束,模型在 {out_dir}")
+    print(f"{bar}\n  训练结束 → {out_dir}\n{bar}")
 
 
 def main() -> None:
