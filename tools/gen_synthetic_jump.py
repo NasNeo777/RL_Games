@@ -21,11 +21,12 @@ good ones — find_piece is not reliable enough to auto-trust every matte.
 from __future__ import annotations
 
 import argparse
+import math
 import random
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter, ImageEnhance
+from PIL import Image, ImageDraw, ImageEnhance
 
 ROOT = Path(__file__).resolve().parents[1]
 SPRITE_DIR = ROOT / "tools" / "sprites"
@@ -113,24 +114,45 @@ def draw_cuboid(draw, rng, cx, cy, rx, total_h, base):
     return int(cx - rx), int(cy - ry), int(cx + rx), int(cy + ry)
 
 
-def draw_round(draw, rng, cx, cy, rx, total_h, base, ry_ratio):
+def draw_round(im, draw, rng, cx, cy, rx, total_h, base, ry_ratio):
     """Cylinder (round) / disc (oval) platform: elliptical top + curved body.
 
-    ry_ratio ~0.5 reads as a circle in isometric; smaller/larger reads oval.
+    The body is a *smooth* horizontal light->dark gradient (real cylinder
+    shading), not hard vertical bands; stripes are thin rings, not flat slabs.
+    ry_ratio ~0.5 reads as a circle in isometric; smaller reads as a flat disc.
     """
+    rx_i = max(2, int(round(rx)))
+    th = max(2, int(round(total_h)))
     ry = rx * ry_ratio
-    # rounded bottom: bottom ellipse peeks below the straight body
-    draw.ellipse([cx - rx, cy + total_h - ry, cx + rx, cy + total_h + ry],
-                 fill=shade(base, 0.58))
-    # body split into horizontal stripe bands
-    y = 0.0
-    for thick, col in build_layers(rng, base, total_h):
-        y0, y1 = cy + y, cy + y + thick
-        draw.rectangle([cx - rx, y0, cx + rx, y1], fill=shade(col, 0.72))
-        # subtle left-light / right-dark shading on the cylinder body
-        draw.rectangle([cx - rx, y0, cx - rx * 0.2, y1], fill=shade(col, 0.82))
-        draw.rectangle([cx + rx * 0.3, y0, cx + rx, y1], fill=shade(col, 0.6))
-        y += thick
+    ry_i = max(1, int(round(ry)))
+    w = 2 * rx_i
+    H = th + ry_i                      # extra room for the rounded bottom rim
+
+    # smooth cylindrical shading across the width: brightest left-of-centre
+    # (light from upper-left), falling off to a dark right edge.
+    u = np.linspace(-1.0, 1.0, w)
+    theta = u * (math.pi / 2)
+    fac = 0.42 + 0.60 * np.clip(np.cos(theta + math.pi / 5), 0.0, 1.0)  # (w,)
+    bow = (ry_i * np.sqrt(np.clip(1.0 - u * u, 0.0, 1.0))).astype(int)  # (w,) front dip
+
+    # base body colour, then thin stripe rings that *wrap* the cylinder (a ring
+    # bows downward at the front like the top ellipse).
+    body_c = np.tile(np.array(base, dtype=np.float32), (H, w, 1))
+    st = max(5, int(th * 0.07))
+    for _ in range(rng.choice([0, 1, 1, 2])):
+        sy = rng.randint(int(th * 0.28), max(int(th * 0.28) + 1, int(th * 0.74)))
+        for j in range(w):
+            y0 = sy + int(bow[j])
+            body_c[y0:y0 + st, j] = STRIPE
+
+    rgb = (body_c * fac[None, :, None]).clip(0, 255).astype(np.uint8)
+    # alpha: each column is opaque only down to the curved bottom rim, so the
+    # base reads as a real rounded bottom instead of a flat dark cap.
+    yy = np.arange(H)[:, None]
+    alpha = ((yy < (th + bow[None, :]))).astype(np.uint8) * 255          # (H,w)
+    rgba = np.dstack([rgb, alpha])
+    im.alpha_composite(Image.fromarray(rgba, "RGBA"), (int(round(cx)) - rx_i, int(round(cy))))
+
     draw.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=base)
     draw.arc([cx - rx, cy - ry, cx + rx, cy + ry], 180, 360, fill=shade(base, 1.12), width=2)
     return int(cx - rx), int(cy - ry), int(cx + rx), int(cy + ry)
@@ -162,15 +184,14 @@ def draw_table(draw, rng, cx, cy, rx, total_h, base):
 SHAPES = ["cuboid", "cuboid", "cuboid", "round", "round", "oval", "table"]
 
 
-def draw_platform(draw, rng, cx, cy, rx, total_h) -> tuple[int, int, int, int]:
-    """Dispatch to a random platform shape. Returns the top-surface bbox
+def draw_platform(im, draw, rng, cx, cy, rx, total_h, shape) -> tuple[int, int, int, int]:
+    """Dispatch to the given platform shape. Returns the top-surface bbox
     (the landing label) — never the extruded sides/legs."""
     base = rng.choice(TOP_COLORS)
-    shape = rng.choice(SHAPES)
     if shape == "round":
-        return draw_round(draw, rng, cx, cy, rx, total_h, base, rng.uniform(0.46, 0.54))
+        return draw_round(im, draw, rng, cx, cy, rx, total_h, base, rng.uniform(0.46, 0.54))
     if shape == "oval":
-        return draw_round(draw, rng, cx, cy, rx, total_h, base, rng.uniform(0.30, 0.40))
+        return draw_round(im, draw, rng, cx, cy, rx, total_h, base, rng.uniform(0.30, 0.40))
     if shape == "table":
         return draw_table(draw, rng, cx, cy, rx, total_h, base)
     return draw_cuboid(draw, rng, cx, cy, rx, total_h, base)
@@ -210,26 +231,31 @@ def gen_scene(rng: random.Random, pawns: list[Image.Image]):
             cy = rng.uniform(H * 0.32, H * 0.64)
             # spread platforms horizontally (diagonal layout like the real game),
             # never stacked vertically
-            if all(abs(cx - ox) > (rx + orx) * 0.72 for ox, oy, orx, _ in plats):
-                plats.append((cx, cy, rx, total_h))
+            if all(abs(cx - ox) > (rx + orx) * 0.72 for ox, oy, orx, _, _ in plats):
+                plats.append((cx, cy, rx, total_h, rng.choice(SHAPES)))
                 break
     plats.sort(key=lambda p: p[1])  # far (higher) first
 
-    # soft shadows on one blurred layer under the platforms
+    # shape-matched cast shadows (diamond for boxes, ellipse for round), flat
+    # and crisp -- no Gaussian feather (the "毛边" the real game doesn't have).
+    # Light comes from the upper-right, so the footprint is offset down-left.
     shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     sd = ImageDraw.Draw(shadow)
-    for (cx, cy, rx, total_h) in plats:
+    for (cx, cy, rx, total_h, shape) in plats:
         ry = rx * 0.5
-        sx, sy = cx - rx * 0.35, cy + total_h * 0.9
-        sd.ellipse([sx - rx * 1.15, sy - ry * 0.9, sx + rx * 1.05, sy + ry * 1.25],
-                   fill=(58, 62, 72, rng.randint(70, 105)))
-    shadow = shadow.filter(ImageFilter.GaussianBlur(18))
+        scx, scy = cx - rx * 0.5, cy + total_h + ry * 0.35
+        col = (52, 56, 66, 90)
+        if shape in ("round", "oval"):
+            sry = rx * (0.33 if shape == "oval" else 0.5)
+            sd.ellipse([scx - rx, scy - sry, scx + rx, scy + sry], fill=col)
+        else:
+            sd.polygon(diamond(scx, scy, rx, ry), fill=col)
     img = Image.alpha_composite(img, shadow)
     draw = ImageDraw.Draw(img)
 
     plat_boxes = []
-    for (cx, cy, rx, total_h) in plats:
-        bx = draw_platform(draw, rng, cx, cy, rx, total_h)
+    for (cx, cy, rx, total_h, shape) in plats:
+        bx = draw_platform(img, draw, rng, cx, cy, rx, total_h, shape)
         plat_boxes.append((cx, cy, rx, bx))
         boxes.append((LANDING_ID, *bx))
 
