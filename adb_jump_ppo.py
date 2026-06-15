@@ -190,33 +190,27 @@ def row_runs(mask_row: np.ndarray, min_len: int = 8, max_len: int = 320) -> list
     return runs
 
 
-def grow_region(
-    arr: np.ndarray,
+def grow_mask_region(
+    mask: np.ndarray,
     seed_x: int,
     seed_y: int,
     x0: int,
     y0: int,
-    x1: int,
-    y1: int,
-    color_tol: float = 34.0,
 ) -> np.ndarray:
-    roi = arr[y0:y1, x0:x1]
-    h, w, _ = roi.shape
+    h, w = mask.shape
     sx = max(0, min(w - 1, seed_x - x0))
     sy = max(0, min(h - 1, seed_y - y0))
-    seed = roi[sy, sx].astype(np.int16)
+    if not mask[sy, sx]:
+        return np.empty((0, 2), dtype=np.int32)
     q = deque([(sy, sx)])
     visited = np.zeros((h, w), dtype=bool)
     visited[sy, sx] = True
     region: list[tuple[int, int]] = []
     while q:
         cy, cx = q.popleft()
-        px = roi[cy, cx].astype(np.int16)
-        if np.linalg.norm(px - seed) > color_tol:
-            continue
         region.append((cy, cx))
         for ny, nx in ((cy - 1, cx), (cy + 1, cx), (cy, cx - 1), (cy, cx + 1)):
-            if 0 <= ny < h and 0 <= nx < w and not visited[ny, nx]:
+            if 0 <= ny < h and 0 <= nx < w and mask[ny, nx] and not visited[ny, nx]:
                 visited[ny, nx] = True
                 q.append((ny, nx))
     if not region:
@@ -236,9 +230,14 @@ def landing_band_from_region(
 
     y0 = int(region[:, 0].min())
     y1 = int(region[:, 0].max())
+    x0 = int(region[:, 1].min())
+    x1 = int(region[:, 1].max())
     height = y1 - y0 + 1
     if height < 10:
         return None
+    width = x1 - x0 + 1
+    region_mask = np.zeros((height, width), dtype=bool)
+    region_mask[region[:, 0] - y0, region[:, 1] - x0] = True
 
     max_search_y = y0 + int(height * 0.58)
     spans: list[tuple[int, int, int, float, int]] = []
@@ -282,8 +281,36 @@ def landing_band_from_region(
         std_width = float(widths.std())
         std_center = float(centers.std())
         mean_y = float(np.mean(ys))
-        # Prefer wide, flat horizontal bands slightly below the very first visible tip.
-        score = mean_width - 2.2 * std_width - 1.8 * std_center + 0.08 * (mean_y - y0)
+        band_sx = int(min(row[1] for row in chunk))
+        band_ex = int(max(row[2] for row in chunk))
+        band_cy = int(round(mean_y))
+        band_cols = slice(max(0, band_sx - x0), min(width, band_ex - x0 + 1))
+        local_y = max(0, min(height - 1, band_cy - y0))
+        above0 = max(0, local_y - 10)
+        above1 = local_y
+        below0 = min(height, local_y + 1)
+        below1 = min(height, local_y + 12)
+        if above1 > above0:
+            clear_above = 1.0 - float(region_mask[above0:above1, band_cols].any(axis=0).mean())
+        else:
+            clear_above = 1.0
+        if below1 > below0:
+            support_below = float(region_mask[below0:below1, band_cols].any(axis=0).mean())
+        else:
+            support_below = 0.0
+        rel_y = (mean_y - y0) / max(1.0, height - 1.0)
+        top_pref = max(0.0, 1.0 - abs(rel_y - 0.18) / 0.22)
+        # Prefer wide, flat bands near the upper surface: top rows should be
+        # relatively empty and the structure should continue below the band.
+        score = (
+            mean_width
+            - 2.2 * std_width
+            - 1.8 * std_center
+            + 42.0 * clear_above
+            + 18.0 * support_below
+            + 24.0 * top_pref
+            - 26.0 * max(0.0, rel_y - 0.34)
+        )
         if best is None or score > best[0]:
             best = (score, chunk)
 
@@ -374,7 +401,10 @@ def find_target(arr: np.ndarray, piece: Piece) -> Target | None:
         landing = landing_band_from_region(region, x_abs)
         if landing is not None:
             _, ly, half_width, _ = landing
-            candidate_score = half_width * 2.0 + 0.18 * (ly - ry0) + 0.05 * score
+            region_y0 = float(region[:, 0].min())
+            region_y1 = float(region[:, 0].max())
+            rel_landing = (ly - region_y0) / max(1.0, region_y1 - region_y0)
+            candidate_score = half_width * 2.0 + 18.0 * max(0.0, 1.0 - rel_landing / 0.45) + 0.05 * score
         else:
             candidate_score = len(region) * 0.01 + 0.05 * score
         if candidate_score > best_score:
