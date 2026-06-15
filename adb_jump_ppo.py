@@ -9,7 +9,7 @@ import math
 import subprocess
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -51,6 +51,21 @@ class JumpRecord:
     press_ms: int
 
 
+@dataclass
+class Kalman1D:
+    x: float
+    p: float = 1.0
+    q: float = 1.5
+    r: float = 16.0
+
+    def update(self, z: float) -> float:
+        self.p += self.q
+        k = self.p / (self.p + self.r)
+        self.x += k * (z - self.x)
+        self.p = (1.0 - k) * self.p
+        return self.x
+
+
 def adb_bytes(serial: str | None, *args: str) -> bytes:
     cmd = ["adb"]
     if serial:
@@ -70,6 +85,14 @@ def adb_run(serial: str | None, *args: str) -> None:
 def capture_screen(serial: str | None) -> Image.Image:
     data = adb_bytes(serial, "exec-out", "screencap", "-p")
     return Image.open(io.BytesIO(data)).convert("RGB")
+
+
+def capture_and_detect(serial: str | None) -> tuple[Image.Image, np.ndarray, Piece | None, Target | None]:
+    img = capture_screen(serial)
+    arr = np.array(img)
+    piece = find_piece(arr)
+    target = find_target(arr, piece) if piece is not None else None
+    return img, arr, piece, target
 
 
 def connected_components(mask: np.ndarray, min_pixels: int = 20) -> list[np.ndarray]:
@@ -376,6 +399,55 @@ def save_debug_image(
     dbg.save(out_path)
 
 
+def stable_detect(
+    serial: str | None,
+    captures: int,
+    sample_delay: float,
+) -> tuple[Image.Image, np.ndarray, Piece | None, Target | None, int]:
+    last_img = None
+    last_arr = None
+    last_piece = None
+    last_target = None
+    valid = 0
+    fx = fy = tx = ty = th = None
+
+    for i in range(max(1, captures)):
+        img, arr, piece, target = capture_and_detect(serial)
+        if piece is not None:
+            last_img, last_arr, last_piece = img, arr, piece
+        if piece is not None and target is not None:
+            last_img, last_arr, last_piece, last_target = img, arr, piece, target
+            if fx is None:
+                fx = Kalman1D(piece.x, p=4.0, q=1.2, r=9.0)
+                fy = Kalman1D(piece.y, p=4.0, q=1.2, r=9.0)
+                tx = Kalman1D(target.x, p=9.0, q=2.0, r=16.0)
+                ty = Kalman1D(target.y, p=9.0, q=2.0, r=16.0)
+                th = Kalman1D(target.half_width_px, p=9.0, q=2.0, r=20.0)
+            else:
+                fx.update(piece.x)
+                fy.update(piece.y)
+                tx.update(target.x)
+                ty.update(target.y)
+                th.update(target.half_width_px)
+            valid += 1
+        if i + 1 < captures:
+            time.sleep(sample_delay)
+
+    if last_img is None or last_arr is None:
+        img, arr, piece, target = capture_and_detect(serial)
+        return img, arr, piece, target, 1 if (piece and target) else 0
+
+    if valid >= 2 and last_piece is not None and last_target is not None:
+        last_piece = replace(last_piece, x=float(fx.x), y=float(fy.x))
+        last_target = replace(
+            last_target,
+            x=float(tx.x),
+            y=float(ty.x),
+            half_width_px=float(th.x),
+        )
+    return last_img, last_arr, last_piece, last_target, valid
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--serial", help="adb serial; default uses the only attached device")
@@ -383,6 +455,8 @@ def main() -> None:
     p.add_argument("--coef", type=float, default=1.36, help="ms per pixel baseline")
     p.add_argument("--interval", type=float, default=2.05, help="seconds to wait after each jump")
     p.add_argument("--max-jumps", type=int, default=0, help="0 means unlimited")
+    p.add_argument("--captures", type=int, default=3, help="screenshots to fuse with Kalman before each jump")
+    p.add_argument("--sample-delay", type=float, default=0.06, help="seconds between fused screenshots")
     p.add_argument("--no-adapt", action="store_true", help="disable online coefficient calibration")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--debug-dir", default="debug_jump_ppo")
@@ -399,10 +473,12 @@ def main() -> None:
     idle_retries = 0
     prev_jump: JumpRecord | None = None
     while args.max_jumps <= 0 or jumps < args.max_jumps:
-        img = capture_screen(args.serial)
-        arr = np.array(img)
+        img, arr, piece, target, valid_obs = stable_detect(
+            args.serial,
+            captures=args.captures,
+            sample_delay=args.sample_delay,
+        )
         h, w, _ = arr.shape
-        piece = find_piece(arr)
         if piece is None:
             idle_retries += 1
             print(f"[{jumps}] piece not found, tap to (re)start")
@@ -418,10 +494,15 @@ def main() -> None:
                 print(calib_msg)
             prev_jump = None
 
-        target = find_target(arr, piece)
         if target is None:
             print(f"[{jumps}] target not found, waiting")
-            save_debug_image(img, debug_dir / f"{jumps:04d}_no_target.png", piece, None, "target not found")
+            save_debug_image(
+                img,
+                debug_dir / f"{jumps:04d}_no_target.png",
+                piece,
+                None,
+                f"target not found obs={valid_obs}/{max(1, args.captures)}",
+            )
             time.sleep(0.8)
             continue
 
@@ -436,7 +517,8 @@ def main() -> None:
         text = (
             f"jump={jumps + 1} gap_px={gap_px:.1f} half_px={target.half_width_px:.1f} "
             f"gap_w={gap_world:.2f} half_w={half_world:.2f} action={action} "
-            f"pred={pred_dist:.2f} scale={scale:.3f} coef={coef:.4f} press={press_ms}ms"
+            f"pred={pred_dist:.2f} scale={scale:.3f} coef={coef:.4f} "
+            f"obs={valid_obs}/{max(1, args.captures)} press={press_ms}ms"
         )
         print(text)
         save_debug_image(img, debug_dir / f"{jumps:04d}.png", piece, target, text)
