@@ -266,6 +266,13 @@ def train(env: RealJumpEnv, agent, episodes: int, out_dir: Path, save_every: int
                    extra={"steps": getattr(agent, "steps", 0),
                           "updates": getattr(agent, "updates", 0)})
 
+    def _is_restart_noise(episode_buf) -> bool:
+        """首跳即死通常是重开/落点未就绪的脏样本,整局不进 replay。"""
+        if len(episode_buf) != 1:
+            return False
+        _, _, reward, _, terminated, truncated, info = episode_buf[0]
+        return bool(terminated and not truncated and info.get("died") and reward <= 0)
+
     mode = (f"暖启动探索(coef={warmup_coef}±{warmup_window}档)"
             if warmup_coef > 0 else "纯随机探索")
     print(f"\n{bar}\n  真机在线 DQN · 跳一跳   →  {out_dir}\n  {mode}\n{bar}")
@@ -275,6 +282,7 @@ def train(env: RealJumpEnv, agent, episodes: int, out_dir: Path, save_every: int
             print("⚠️  进不去游戏(检测不到棋子),检查 adb / 游戏是否在前台。")
             return
         ep_return, steps = 0.0, 0
+        episode_buf = []
         while True:
             dist_px = float(obs[2]) * (env.W or 1080)   # obs = [框宽, 框高, 距离]
             # 自己做 ε 分支:便于标注「探索/利用」,也保证 ε 可续训。
@@ -289,8 +297,7 @@ def train(env: RealJumpEnv, agent, episodes: int, out_dir: Path, save_every: int
             else:
                 action = int(agent.act(obs, deterministic=True))
             next_obs, reward, terminated, truncated, info = env.step(action)
-            agent.observe(obs, action, reward, next_obs, terminated, truncated)
-            agent.update()
+            episode_buf.append((obs, action, reward, next_obs, terminated, truncated, info))
             obs = next_obs
             ep_return += reward
             steps += 1
@@ -305,14 +312,24 @@ def train(env: RealJumpEnv, agent, episodes: int, out_dir: Path, save_every: int
                 continue
             if terminated or steps >= env.max_steps:
                 break
-        best_score = max(best_score, env.prev_score)
-        new_best = ep_return > best_return
-        if new_best:
-            best_return = ep_return
-            _save("best.pt")
-        flag = "🏆" if new_best else "  "
+        dropped = _is_restart_noise(episode_buf)
+        if not dropped:
+            for step_obs, step_action, step_reward, step_next_obs, step_terminated, step_truncated, _ in episode_buf:
+                agent.observe(step_obs, step_action, step_reward,
+                              step_next_obs, step_terminated, step_truncated)
+                agent.update()
+            best_score = max(best_score, env.prev_score)
+            new_best = ep_return > best_return
+            if new_best:
+                best_return = ep_return
+                _save("best.pt")
+            flag = "🏆" if new_best else "  "
+        else:
+            new_best = False
+            flag = "⚠️"
+        suffix = " │ 丢弃(疑似重开噪声,不入训练集)" if dropped else ""
         print(f"{flag} 第 {ep:<5d} 局 │ 步 {steps:<3d} │ 本局分 {env.prev_score:<3d} │ "
-              f"回报 {ep_return:6.1f} │ ε {getattr(agent, 'epsilon', 0):.2f} │ 最高分 {best_score}")
+              f"回报 {ep_return:6.1f} │ ε {getattr(agent, 'epsilon', 0):.2f} │ 最高分 {best_score}{suffix}")
         if ep % save_every == 0:
             _save("latest.pt")
     _save("latest.pt")
