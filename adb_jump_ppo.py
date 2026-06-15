@@ -285,6 +285,9 @@ def landing_band_from_region(
         band_ex = int(max(row[2] for row in chunk))
         band_cy = int(round(mean_y))
         band_cols = slice(max(0, band_sx - x0), min(width, band_ex - x0 + 1))
+        band_width = band_cols.stop - band_cols.start
+        if band_width <= 0:
+            continue
         local_y = max(0, min(height - 1, band_cy - y0))
         above0 = max(0, local_y - 10)
         above1 = local_y
@@ -395,7 +398,7 @@ def find_target(arr: np.ndarray, piece: Piece) -> Target | None:
         score = float(np.linalg.norm(px - bg_rows[y_abs]))
         if score < 10:
             continue
-        region = grow_region(arr, x_abs, y_abs, rx0, ry0, rx1, ry1)
+        region = grow_mask_region(non_bg, x_abs, y_abs, rx0, ry0)
         if len(region) < 40:
             continue
         landing = landing_band_from_region(region, x_abs)
