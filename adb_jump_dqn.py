@@ -61,6 +61,21 @@ class ScoreReader:
         self.thresh = thresh
         self.templates = self._load_templates()
 
+    @staticmethod
+    def _norm(gray: np.ndarray):
+        """统一成黑底白字、裁到数字紧致 bbox、缩放 24×36 的二值图。
+
+        模板和待匹配 cell 都过这一步,保证可比(Otsu 自适应阈值 + 极性归一)。"""
+        import cv2
+        _, b = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        if b.mean() > 127:          # 前景应是少数 → 若白多则反相
+            b = 255 - b
+        ys, xs = np.where(b > 0)
+        if len(xs) == 0:
+            return None
+        b = b[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+        return cv2.resize(b, (24, 36))
+
     def _load_templates(self):
         import cv2
         tpl = {}
@@ -69,8 +84,9 @@ class ScoreReader:
                 p = DIGIT_DIR / f"{d}.png"
                 if p.exists():
                     img = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE)
-                    if img is not None:
-                        tpl[d] = cv2.resize(img, (24, 36))
+                    n = self._norm(img) if img is not None else None
+                    if n is not None:
+                        tpl[d] = n
         return tpl
 
     @property
@@ -106,13 +122,10 @@ class ScoreReader:
         if not boxes:
             return None
         digits = []
-        ys = mask.any(axis=1)
-        ry = np.where(ys)[0]
-        if len(ry) == 0:
-            return None
-        ty, by = int(ry.min()), int(ry.max()) + 1
         for x0, x1 in boxes:
-            cell = cv2.resize(mask[ty:by, x0:x1] * 255, (24, 36))
+            cell = self._norm(gray[:, x0:x1])      # 同模板一致的归一化
+            if cell is None:
+                return None
             best_d, best_s = None, -1.0
             for d, tpl in self.templates.items():
                 s = float(cv2.matchTemplate(cell, tpl, cv2.TM_CCOEFF_NORMED).max())
