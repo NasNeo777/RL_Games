@@ -322,6 +322,9 @@ def main() -> None:
     p.add_argument("--death-penalty", type=float, default=3.0)
     p.add_argument("--episodes", type=int, default=200)
     p.add_argument("--max-steps", type=int, default=500)
+    # 暖启动:探索时围绕线性估计 press≈coef×距离 取档(设 0 = 纯随机探索)
+    p.add_argument("--warmup-coef", type=float, default=1.35, help="暖启动探索的线性系数,0=纯随机")
+    p.add_argument("--warmup-window", type=int, default=2, help="围绕线性估计探索的档位半径")
     # DQN(真机样本少 → 全部调小)
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--warmup", type=int, default=32)
@@ -366,7 +369,8 @@ def main() -> None:
         agent.load_state_dict(sd["state_dict"] if "state_dict" in sd else sd)
         print(f"从 {out_dir/'latest.pt'} 续训")
 
-    train(env, agent, args.episodes, out_dir, args.save_every)
+    train(env, agent, args.episodes, out_dir, args.save_every,
+          warmup_coef=args.warmup_coef, warmup_window=args.warmup_window)
 
 
 if __name__ == "__main__":
