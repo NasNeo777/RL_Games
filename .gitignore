@@ -1,3 +1,4 @@
 /runs/
 /debug_jump_ppo/
-/yolo11n.pt
+/*.pt
+/datasets/

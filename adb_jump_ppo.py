@@ -545,6 +545,18 @@ def save_debug_image(
     dbg.save(out_path)
 
 
+def save_raw_image(
+    img: Image.Image,
+    out_dir: Path | None,
+    frame_idx: int,
+    tag: str,
+) -> None:
+    if out_dir is None:
+        return
+    out_dir.mkdir(parents=True, exist_ok=True)
+    img.save(out_dir / f"frame_{frame_idx:05d}_{tag}.png")
+
+
 def stable_detect(
     serial: str | None,
     captures: int,
@@ -658,6 +670,7 @@ def main() -> None:
     p.add_argument("--no-adapt", action="store_true", help="disable online coefficient calibration")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--debug-dir", default="debug_jump_ppo")
+    p.add_argument("--raw-dir", help="save unannotated screenshots for later labeling")
     args = p.parse_args()
 
     _, agent, ckpt = load_agent_for_demo(args.ckpt)
@@ -681,9 +694,11 @@ def main() -> None:
 
     debug_dir = Path(args.debug_dir)
     debug_dir.mkdir(parents=True, exist_ok=True)
+    raw_dir = Path(args.raw_dir).expanduser() if args.raw_dir else None
 
     coef = args.coef
     jumps = 0
+    frame_idx = 0
     idle_retries = 0
     prev_jump: JumpRecord | None = None
     last_jump_time: float | None = None
@@ -699,6 +714,8 @@ def main() -> None:
             if last_jump_time is not None and time.time() - last_jump_time < args.ready_timeout:
                 time.sleep(args.poll_delay)
                 continue
+            save_raw_image(img, raw_dir, frame_idx, "no_piece")
+            frame_idx += 1
             idle_retries += 1
             print(f"[{jumps}] piece not found, tap to (re)start")
             save_debug_image(img, debug_dir / f"{jumps:04d}_no_piece.png", None, None, "piece not found")
@@ -719,6 +736,8 @@ def main() -> None:
             if last_jump_time is not None and time.time() - last_jump_time < args.ready_timeout:
                 time.sleep(args.poll_delay)
                 continue
+            save_raw_image(img, raw_dir, frame_idx, "no_target")
+            frame_idx += 1
             print(f"[{jumps}] target not found, waiting")
             save_debug_image(
                 img,
@@ -748,6 +767,8 @@ def main() -> None:
             f"obs={valid_obs}/{max(1, args.captures)} press={press_ms}ms"
         )
         print(text)
+        save_raw_image(img, raw_dir, frame_idx, "ready")
+        frame_idx += 1
         save_debug_image(img, debug_dir / f"{jumps:04d}.png", piece, target, text)
 
         if args.dry_run:
