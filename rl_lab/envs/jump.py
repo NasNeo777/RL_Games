@@ -19,6 +19,9 @@
 奖励:落台 +1,踩得越靠中心额外 +0~2,正中靶心再 +1 连击奖励;
 摔下去 -5。连续踩中 SUCCESS_SCORE 块台子视为通关,+50 并结束回合。
 """
+import base64
+import io
+
 import numpy as np
 from PIL import Image, ImageDraw
 
@@ -57,6 +60,7 @@ class JumpEnv(BaseEnv):
         self.next_dir = 0
         self.score = 0
         self.t = 0
+        self._last_obs = None
 
     def reset(self, seed=None):
         if seed is not None:
@@ -68,9 +72,11 @@ class JumpEnv(BaseEnv):
         self.score = 0
         self.t = 0
         self.frames = []
+        obs = self._obs()
+        self._last_obs = obs
         if self.record:
             self._record_ready()
-        return self._obs()
+        return obs
 
     def step(self, action):
         action = int(action)
@@ -111,15 +117,21 @@ class JumpEnv(BaseEnv):
         terminated = success or not landed
         truncated = (not terminated) and self.t >= self.max_steps
         info = {"success": success, "score": self.score}
-        if self.record:
-            self.frames.append({
+        frame = {
                 "p0": p0, "p1": p1, "land": land,
                 "s0": s0, "s1": s1,
                 "ok": bool(landed),
                 "perfect": bool(perfect),
                 "score": self.score,
-            })
-        return self._obs(), reward, terminated, truncated, info
+            }
+        payload = self._frame_obs_payload(self._last_obs)
+        if payload is not None:
+            frame["obs"] = payload
+        if self.record:
+            self.frames.append(frame)
+        obs = self._obs()
+        self._last_obs = obs
+        return obs, reward, terminated, truncated, info
 
     def _gap(self):
         return abs(self.next_a - self.a) + abs(self.next_b - self.b)
@@ -142,9 +154,12 @@ class JumpEnv(BaseEnv):
             (self.next_half - half_mid) / half_amp,
         ], dtype=np.float32)
 
+    def _frame_obs_payload(self, obs) -> str | None:
+        return None
+
     def _record_ready(self):
         # 开局静止帧:小人站在 0 号台中心,下一块台子已就位(p0==land 不起跳)
-        self.frames.append({
+        frame = {
             "p0": [round(self.a, 3), round(self.b, 3), round(self.cur_half, 3)],
             "p1": [round(self.next_a, 3), round(self.next_b, 3),
                    round(self.next_half, 3)],
@@ -153,7 +168,11 @@ class JumpEnv(BaseEnv):
             "ok": True,
             "perfect": False,
             "score": 0,
-        })
+        }
+        payload = self._frame_obs_payload(self._last_obs)
+        if payload is not None:
+            frame["obs"] = payload
+        self.frames.append(frame)
 
     def render_spec(self):
         return {
@@ -196,6 +215,16 @@ def preprocess_jump_screen(frame: np.ndarray | Image.Image) -> np.ndarray:
     crop = img.crop((left, top, right, bottom))
     crop = crop.resize((PIX, PIX), Image.Resampling.BILINEAR)
     return np.asarray(crop, dtype=np.uint8).copy()[None, :, :]
+
+
+def encode_obs_png(obs: np.ndarray) -> str:
+    arr = np.asarray(obs)
+    if arr.ndim == 3:
+        arr = arr[0]
+    img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), mode="L")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
 class JumpPixelsEnv(JumpEnv):
@@ -428,6 +457,16 @@ class JumpPixelsEnv(JumpEnv):
         img = self._apply_post(img)
         return img[None, :, :]
 
+    def _frame_obs_payload(self, obs) -> str | None:
+        if obs is None:
+            return None
+        return encode_obs_png(obs)
+
+    def render_spec(self):
+        spec = super().render_spec()
+        spec["obs_label"] = f"送给 PPO 的观测 {PIX}×{PIX} 灰度图"
+        return spec
+
 
 class JumpScreenEnv(JumpEnv):
     """整帧截图 -> 裁剪缩放 -> 直喂 PPO 的版本。
@@ -657,3 +696,13 @@ class JumpScreenEnv(JumpEnv):
     def _obs(self):
         frame = self._render_full_frame()
         return preprocess_jump_screen(frame)
+
+    def _frame_obs_payload(self, obs) -> str | None:
+        if obs is None:
+            return None
+        return encode_obs_png(obs)
+
+    def render_spec(self):
+        spec = super().render_spec()
+        spec["obs_label"] = f"送给 PPO 的观测 {PIX}×{PIX} 灰度裁剪图"
+        return spec

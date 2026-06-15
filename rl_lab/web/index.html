@@ -21,6 +21,14 @@
   .demo { flex: 1 1 460px; }
   .stats { flex: 1 1 380px; }
   canvas { display: block; width: 100%; border-radius: 8px; background: #0a0e12; }
+  .obs-panel { margin-top: 12px; padding: 12px; border: 1px solid var(--border);
+               border-radius: 8px; background: #141b22; display: none; }
+  .obs-panel.show { display: block; }
+  .obs-panel .title { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+  .obs-panel img { display: block; width: min(220px, 100%); aspect-ratio: 1 / 1;
+                   image-rendering: pixelated; border-radius: 8px;
+                   border: 1px solid #31404f; background: #0a0e12; }
+  .obs-panel .hint { margin-top: 8px; color: var(--muted); font-size: 12px; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
          margin: 10px 0; }
   select, button { background: #232d38; color: var(--text); font: inherit;
@@ -68,6 +76,11 @@
       </select></label>
     </div>
     <canvas id="stage" width="640" height="480"></canvas>
+    <div id="obsPanel" class="obs-panel">
+      <div id="obsTitle" class="title">送给 PPO 的观测</div>
+      <img id="obsPreview" alt="agent observation preview">
+      <div class="hint">这里显示模型每一步真正吃进去的预处理图像。</div>
+    </div>
     <div class="row" id="demoInfo">载入中…</div>
   </div>
 
@@ -88,6 +101,18 @@
 const $ = id => document.getElementById(id);
 let state = { run: null, which: "best", demo: null, playT: 0, lastTs: 0,
               autoNew: false, refreshing: false };
+
+function setObsPreview(spec, frame) {
+  const panel = $("obsPanel"), img = $("obsPreview"), title = $("obsTitle");
+  if (!frame || !frame.obs) {
+    panel.classList.remove("show");
+    img.removeAttribute("src");
+    return;
+  }
+  panel.classList.add("show");
+  title.textContent = spec.obs_label || "送给 PPO 的观测";
+  if (img.src !== frame.obs) img.src = frame.obs;
+}
 
 /* ===== 渲染器注册表:新游戏在这里加一个 type 对应的画法 ===== */
 const RENDERERS = {
@@ -708,6 +733,7 @@ function animate(ts) {
     celebT = state.playT - total;
   }
   const fIdx = Math.min(Math.floor(fpos), d.frames.length - 1);
+  setObsPreview(d.spec, d.frames[fIdx]);
   const renderer = RENDERERS[d.spec.type];
   if (renderer) renderer(ctx, cssW, cssH, d.spec, d.frames,
                          fIdx, Math.min(1, fpos - fIdx));
@@ -772,6 +798,7 @@ async function loadDemo(replay = false, auto = false) {
     if (d.error) { $("demoInfo").textContent = "⚠ " + d.error; return false; }
     state.demo = d; state.playT = 0;
     state.lastVideoImg = null; state.lastObsImg = null;
+    setObsPreview(d.spec, d.frames[0]);
     $("demoInfo").innerHTML =
       `算法 <b>${d.algo.toUpperCase()}</b> · ${d.which === "best" ? "最优" : "最新"}模型 · ` +
       `回报 <b>${d.return}</b> · ${d.steps} 步 · ` +
