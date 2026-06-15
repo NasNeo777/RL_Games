@@ -66,6 +66,67 @@ class Kalman1D:
         return self.x
 
 
+YOLO_PIECE_NAMES = {"piece", "pawn", "player", "jumper"}
+YOLO_TARGET_NAMES = {"landing", "target", "platform", "goal"}
+
+
+class YoloJumpDetector:
+    def __init__(self, model_path: str, conf: float = 0.25, device: str = "cpu") -> None:
+        from ultralytics import YOLO
+
+        self.model_path = Path(model_path)
+        if not self.model_path.exists():
+            raise FileNotFoundError(f"YOLO model not found: {self.model_path}")
+        self.model = YOLO(str(self.model_path))
+        self.conf = conf
+        self.device = device
+        names = getattr(self.model, "names", {}) or {}
+        self.names = {int(k): str(v).lower() for k, v in names.items()}
+
+    def detect(self, arr: np.ndarray) -> tuple[Piece | None, Target | None]:
+        results = self.model.predict(source=arr, conf=self.conf, device=self.device, verbose=False)
+        if not results:
+            return None, None
+        boxes = getattr(results[0], "boxes", None)
+        if boxes is None or len(boxes) == 0:
+            return None, None
+
+        piece_box: tuple[float, tuple[int, int, int, int]] | None = None
+        target_box: tuple[float, tuple[int, int, int, int]] | None = None
+
+        for box in boxes:
+            cls_id = int(float(box.cls[0]))
+            conf = float(box.conf[0])
+            x0, y0, x1, y1 = [int(round(v)) for v in box.xyxy[0].tolist()]
+            name = self.names.get(cls_id, "")
+            if name in YOLO_PIECE_NAMES or (not name and cls_id == 0):
+                if piece_box is None or conf > piece_box[0]:
+                    piece_box = (conf, (x0, y0, x1, y1))
+            elif name in YOLO_TARGET_NAMES or (not name and cls_id == 1):
+                if target_box is None or conf > target_box[0]:
+                    target_box = (conf, (x0, y0, x1, y1))
+
+        piece = piece_from_bbox(piece_box[1]) if piece_box else None
+        target = target_from_bbox(target_box[1]) if target_box else None
+        return piece, target
+
+
+def piece_from_bbox(bbox: tuple[int, int, int, int]) -> Piece:
+    x0, y0, x1, y1 = bbox
+    x = (x0 + x1) / 2.0
+    y = float(y1 - max(8, int((y1 - y0) * 0.06)))
+    return Piece(x=x, y=y, bbox=bbox)
+
+
+def target_from_bbox(bbox: tuple[int, int, int, int]) -> Target:
+    x0, y0, x1, y1 = bbox
+    x = (x0 + x1) / 2.0
+    y = (y0 + y1) / 2.0
+    half_width_px = max(12.0, (x1 - x0) / 2.0)
+    seed = (int(round(x)), int(round(y)))
+    return Target(x=x, y=y, half_width_px=half_width_px, bbox=bbox, seed=seed)
+
+
 def adb_bytes(serial: str | None, *args: str) -> bytes:
     cmd = ["adb"]
     if serial:
@@ -87,11 +148,24 @@ def capture_screen(serial: str | None) -> Image.Image:
     return Image.open(io.BytesIO(data)).convert("RGB")
 
 
-def capture_and_detect(serial: str | None) -> tuple[Image.Image, np.ndarray, Piece | None, Target | None]:
-    img = capture_screen(serial)
-    arr = np.array(img)
+def heuristic_detect(arr: np.ndarray) -> tuple[Piece | None, Target | None]:
     piece = find_piece(arr)
     target = find_target(arr, piece) if piece is not None else None
+    return piece, target
+
+
+def capture_and_detect(
+    serial: str | None,
+    detector: YoloJumpDetector | None = None,
+) -> tuple[Image.Image, np.ndarray, Piece | None, Target | None]:
+    img = capture_screen(serial)
+    arr = np.array(img)
+    if detector is not None:
+        piece, target = detector.detect(arr)
+        if piece is None or target is None:
+            piece, target = heuristic_detect(arr)
+    else:
+        piece, target = heuristic_detect(arr)
     return img, arr, piece, target
 
 
@@ -230,103 +304,31 @@ def landing_band_from_region(
 
     y0 = int(region[:, 0].min())
     y1 = int(region[:, 0].max())
-    x0 = int(region[:, 1].min())
-    x1 = int(region[:, 1].max())
     height = y1 - y0 + 1
     if height < 10:
         return None
-    width = x1 - x0 + 1
-    region_mask = np.zeros((height, width), dtype=bool)
-    region_mask[region[:, 0] - y0, region[:, 1] - x0] = True
+    cap_limit = y0 + int(height * 0.64)
+    cap = region[region[:, 0] <= cap_limit]
+    if len(cap) < 40:
+        cap = region
 
-    max_search_y = y0 + int(height * 0.58)
-    spans: list[tuple[int, int, int, float, int]] = []
-    max_width = 0
-    for y in range(y0, max_search_y + 1):
-        row_xs = np.sort(region[region[:, 0] == y, 1])
-        if len(row_xs) < 8:
-            continue
-        runs: list[tuple[int, int]] = []
-        start = int(row_xs[0])
-        prev = int(row_xs[0])
-        for x in row_xs[1:].tolist() + [None]:
-            if x is None or x != prev + 1:
-                if prev - start + 1 >= 8:
-                    runs.append((start, prev))
-                if x is not None:
-                    start = int(x)
-            prev = int(x) if x is not None else prev
-        if not runs:
-            continue
-        sx, ex = min(runs, key=lambda r: abs((r[0] + r[1]) / 2 - seed_x))
-        width = ex - sx + 1
-        max_width = max(max_width, width)
-        spans.append((y, sx, ex, (sx + ex) / 2.0, width))
+    cap_y = float(np.quantile(cap[:, 0], 0.72))
+    row_window = max(5, int(round(height * 0.04)))
+    band = cap[np.abs(cap[:, 0] - cap_y) <= row_window]
+    if len(band) < 20:
+        band = cap
 
-    if len(spans) < 5 or max_width < 20:
-        return None
-
-    best = None
-    window = 5
-    for i in range(len(spans) - window + 1):
-        chunk = spans[i:i + window]
-        ys = [row[0] for row in chunk]
-        if any(ys[j + 1] - ys[j] > 1 for j in range(window - 1)):
-            continue
-        widths = np.array([row[4] for row in chunk], dtype=np.float32)
-        centers = np.array([row[3] for row in chunk], dtype=np.float32)
-        mean_width = float(widths.mean())
-        if mean_width < max_width * 0.52:
-            continue
-        std_width = float(widths.std())
-        std_center = float(centers.std())
-        mean_y = float(np.mean(ys))
-        band_sx = int(min(row[1] for row in chunk))
-        band_ex = int(max(row[2] for row in chunk))
-        band_cy = int(round(mean_y))
-        band_cols = slice(max(0, band_sx - x0), min(width, band_ex - x0 + 1))
-        band_width = band_cols.stop - band_cols.start
-        if band_width <= 0:
-            continue
-        local_y = max(0, min(height - 1, band_cy - y0))
-        above0 = max(0, local_y - 10)
-        above1 = local_y
-        below0 = min(height, local_y + 1)
-        below1 = min(height, local_y + 12)
-        if above1 > above0:
-            clear_above = 1.0 - float(region_mask[above0:above1, band_cols].any(axis=0).mean())
-        else:
-            clear_above = 1.0
-        if below1 > below0:
-            support_below = float(region_mask[below0:below1, band_cols].any(axis=0).mean())
-        else:
-            support_below = 0.0
-        rel_y = (mean_y - y0) / max(1.0, height - 1.0)
-        top_pref = max(0.0, 1.0 - abs(rel_y - 0.18) / 0.22)
-        # Prefer wide, flat bands near the upper surface: top rows should be
-        # relatively empty and the structure should continue below the band.
-        score = (
-            mean_width
-            - 2.2 * std_width
-            - 1.8 * std_center
-            + 42.0 * clear_above
-            + 18.0 * support_below
-            + 24.0 * top_pref
-            - 26.0 * max(0.0, rel_y - 0.34)
-        )
-        if best is None or score > best[0]:
-            best = (score, chunk)
-
-    if best is None:
-        return None
-
-    chunk = best[1]
-    sx = int(min(row[1] for row in chunk))
-    ex = int(max(row[2] for row in chunk))
-    cy = float(np.mean([row[0] for row in chunk]))
-    cx = float(np.mean([row[3] for row in chunk]))
-    half_width = (ex - sx) / 2.0
-    bbox = (sx, int(min(row[0] for row in chunk)), ex, int(max(row[0] for row in chunk)))
+    cx = float(np.median(band[:, 1]))
+    cy = float(np.quantile(band[:, 0], 0.58))
+    left = float(np.quantile(band[:, 1], 0.08))
+    right = float(np.quantile(band[:, 1], 0.92))
+    half_width = max(12.0, (right - left) / 2.0)
+    bbox = (
+        int(np.floor(left)),
+        int(np.floor(np.quantile(cap[:, 0], 0.18))),
+        int(np.ceil(right)),
+        int(np.ceil(np.quantile(cap[:, 0], 0.82))),
+    )
     return cx, cy, half_width, bbox
 
 
@@ -547,6 +549,7 @@ def stable_detect(
     serial: str | None,
     captures: int,
     sample_delay: float,
+    detector: YoloJumpDetector | None = None,
 ) -> tuple[Image.Image, np.ndarray, Piece | None, Target | None, int]:
     last_img = None
     last_arr = None
@@ -556,7 +559,7 @@ def stable_detect(
     fx = fy = tx = ty = th = None
 
     for i in range(max(1, captures)):
-        img, arr, piece, target = capture_and_detect(serial)
+        img, arr, piece, target = capture_and_detect(serial, detector=detector)
         if piece is not None:
             last_img, last_arr, last_piece = img, arr, piece
         if piece is not None and target is not None:
@@ -578,7 +581,7 @@ def stable_detect(
             time.sleep(sample_delay)
 
     if last_img is None or last_arr is None:
-        img, arr, piece, target = capture_and_detect(serial)
+        img, arr, piece, target = capture_and_detect(serial, detector=detector)
         return img, arr, piece, target, 1 if (piece and target) else 0
 
     if valid >= 2 and last_piece is not None and last_target is not None:
@@ -598,6 +601,7 @@ def wait_until_ready(
     poll_delay: float,
     ready_streak: int,
     timeout: float,
+    detector: YoloJumpDetector | None = None,
 ) -> bool:
     time.sleep(min_air_time)
     deadline = time.time() + timeout
@@ -605,7 +609,7 @@ def wait_until_ready(
     prev_target = None
     streak = 0
     while time.time() < deadline:
-        _, _, piece, target = capture_and_detect(serial)
+        _, _, piece, target = capture_and_detect(serial, detector=detector)
         if piece is None or target is None:
             prev_piece = None
             prev_target = None
@@ -638,6 +642,10 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--serial", help="adb serial; default uses the only attached device")
     p.add_argument("--ckpt", default="runs/jump_ppo/best.pt")
+    p.add_argument("--detector", choices=["auto", "heuristic", "yolo"], default="auto")
+    p.add_argument("--yolo-model", default="runs/jump_yolo/weights/best.pt")
+    p.add_argument("--yolo-conf", type=float, default=0.25)
+    p.add_argument("--yolo-device", default="cpu")
     p.add_argument("--coef", type=float, default=1.36, help="ms per pixel baseline")
     p.add_argument("--interval", type=float, default=0.2, help="fallback extra wait after an abnormal transition")
     p.add_argument("--max-jumps", type=int, default=0, help="0 means unlimited")
@@ -658,7 +666,18 @@ def main() -> None:
         obs_mode = "image"
     else:
         obs_mode = "vector"
-    print(f"loaded {args.ckpt} ({ckpt['env']} / {ckpt['algo']} / {obs_mode})")
+
+    detector_name = "heuristic"
+    detector: YoloJumpDetector | None = None
+    if args.detector != "heuristic":
+        try:
+            detector = YoloJumpDetector(args.yolo_model, conf=args.yolo_conf, device=args.yolo_device)
+            detector_name = "yolo"
+        except Exception as exc:
+            if args.detector == "yolo":
+                raise SystemExit(f"failed to load YOLO detector: {exc}") from exc
+            print(f"YOLO unavailable, fallback to heuristic detector: {exc}")
+    print(f"loaded {args.ckpt} ({ckpt['env']} / {ckpt['algo']} / {obs_mode} / det={detector_name})")
 
     debug_dir = Path(args.debug_dir)
     debug_dir.mkdir(parents=True, exist_ok=True)
@@ -673,6 +692,7 @@ def main() -> None:
             args.serial,
             captures=args.captures,
             sample_delay=args.sample_delay,
+            detector=detector,
         )
         h, w, _ = arr.shape
         if piece is None:
@@ -724,7 +744,7 @@ def main() -> None:
         text = (
             f"jump={jumps + 1} gap_px={gap_px:.1f} half_px={target.half_width_px:.1f} "
             f"gap_w={gap_world:.2f} half_w={half_world:.2f} action={action} "
-            f"pred={pred_dist:.2f} scale={scale:.3f} coef={coef:.4f} mode={obs_mode} "
+            f"pred={pred_dist:.2f} scale={scale:.3f} coef={coef:.4f} mode={obs_mode} det={detector_name} "
             f"obs={valid_obs}/{max(1, args.captures)} press={press_ms}ms"
         )
         print(text)

@@ -10,3 +10,6 @@ stable-baselines3==2.8.0
 # flappy-bird-gymnasium
 # gym-super-mario-bros
 # gym==0.26.2
+
+# Optional Jump detector training / inference
+# ultralytics

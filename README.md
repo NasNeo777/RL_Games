@@ -155,6 +155,22 @@ NO_OPEN=1 ./start.sh
 .venv/bin/python -m rl_lab.server --port 8000
 ```
 
+### 跳一跳 YOLO 检测
+
+```bash
+# 先装 YOLO 依赖
+.venv/bin/pip install ultralytics
+
+# 从手机抓原始截图并导出 piece / landing 两类标签
+.venv/bin/python tools/capture_jump_yolo_dataset.py --serial <adb-serial> --count 120 --preview
+
+# 训练检测器
+.venv/bin/python tools/train_jump_yolo.py --device cpu
+
+# 真机推理优先走 YOLO,缺模型时会自动回退到规则检测
+.venv/bin/python adb_jump_ppo.py --serial <adb-serial> --detector auto
+```
+
 训练产物写进 `runs/<env>_<algo>/`:
 
 | 文件 | 含义 |

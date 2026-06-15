@@ -1,0 +1,6 @@
+path: /Users/nas/AntigravityProject/强化学习/datasets/jump_yolo
+train: images/train
+val: images/val
+names:
+  0: piece
+  1: landing
