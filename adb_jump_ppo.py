@@ -93,7 +93,7 @@ class YoloJumpDetector:
             return None, None
 
         piece_box: tuple[float, tuple[int, int, int, int]] | None = None
-        target_box: tuple[float, tuple[int, int, int, int]] | None = None
+        landings: list[tuple[int, int, int, int]] = []
 
         for box in boxes:
             cls_id = int(float(box.cls[0]))
@@ -101,15 +101,37 @@ class YoloJumpDetector:
             x0, y0, x1, y1 = [int(round(v)) for v in box.xyxy[0].tolist()]
             name = self.names.get(cls_id, "")
             if name in YOLO_PIECE_NAMES or (not name and cls_id == 0):
-                if piece_box is None or conf > piece_box[0]:
+                if piece_box is None or conf > piece_box[0]:  # one piece: keep best
                     piece_box = (conf, (x0, y0, x1, y1))
             elif name in YOLO_TARGET_NAMES or (not name and cls_id == 1):
-                if target_box is None or conf > target_box[0]:
-                    target_box = (conf, (x0, y0, x1, y1))
+                landings.append((x0, y0, x1, y1))
 
         piece = piece_from_bbox(piece_box[1]) if piece_box else None
-        target = target_from_bbox(target_box[1]) if target_box else None
+
+        target_bbox = self._pick_target(landings, piece)
+        target = target_from_bbox(target_bbox) if target_bbox else None
         return piece, target
+
+    @staticmethod
+    def _pick_target(
+        landings: list[tuple[int, int, int, int]],
+        piece: Piece | None,
+    ) -> tuple[int, int, int, int] | None:
+        """With several platforms detected, jump to the *topmost* one (highest
+        on screen). Skip the platform the piece is currently standing on (its
+        foot point lies inside that box) since that is not a jump target."""
+        if not landings:
+            return None
+        cands = landings
+        if piece is not None:
+            others = [
+                b for b in landings
+                if not (b[0] - 12 <= piece.x <= b[2] + 12 and b[1] - 12 <= piece.y <= b[3] + 40)
+            ]
+            if others:
+                cands = others
+        # topmost = smallest vertical center
+        return min(cands, key=lambda b: (b[1] + b[3]) / 2)
 
 
 def piece_from_bbox(bbox: tuple[int, int, int, int]) -> Piece:
