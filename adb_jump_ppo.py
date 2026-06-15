@@ -43,6 +43,14 @@ class Target:
     seed: tuple[int, int]
 
 
+@dataclass
+class JumpRecord:
+    piece: Piece
+    target: Target
+    gap_px: float
+    press_ms: int
+
+
 def adb_bytes(serial: str | None, *args: str) -> bytes:
     cmd = ["adb"]
     if serial:
@@ -309,6 +317,37 @@ def action_to_distance(action: int) -> float:
     return D_MIN + action / 40.0 * (D_MAX - D_MIN)
 
 
+def update_coef_from_landing(coef: float, prev: JumpRecord, current_piece: Piece) -> tuple[float, str | None]:
+    start = np.array([prev.piece.x, prev.piece.y], dtype=np.float32)
+    target = np.array([prev.target.x, prev.target.y], dtype=np.float32)
+    actual = np.array([current_piece.x, current_piece.y], dtype=np.float32)
+    jump_vec = target - start
+    jump_len = float(np.linalg.norm(jump_vec))
+    if jump_len < 1e-6:
+        return coef, None
+
+    unit = jump_vec / jump_len
+    delta = actual - start
+    actual_proj = float(np.dot(delta, unit))
+    actual_proj = float(np.clip(actual_proj, jump_len * 0.6, jump_len * 1.4))
+    landing_err = float(np.linalg.norm(actual - target))
+    perp_err = float(np.linalg.norm(delta - unit * actual_proj))
+    # Only learn from landings that stayed on roughly the same jump ray.
+    if perp_err > max(85.0, prev.target.half_width_px * 1.4):
+        return coef, None
+    if actual_proj < jump_len * 0.78 or actual_proj > jump_len * 1.22:
+        return coef, None
+
+    ratio = jump_len / max(actual_proj, 1e-6)
+    ratio = float(np.clip(ratio, 0.94, 1.06))
+    new_coef = float(np.clip(coef * (ratio ** 0.35), 1.18, 1.56))
+    msg = (
+        f"calib landing_err={landing_err:.1f}px perp_err={perp_err:.1f}px actual_proj={actual_proj:.1f}px "
+        f"target_gap={jump_len:.1f}px coef {coef:.4f}->{new_coef:.4f}"
+    )
+    return new_coef, msg
+
+
 def long_press(serial: str | None, x: int, y: int, ms: int) -> None:
     adb_run(serial, "shell", "input", "swipe", str(x), str(y), str(x + 1), str(y + 1), str(ms))
 
@@ -344,6 +383,7 @@ def main() -> None:
     p.add_argument("--coef", type=float, default=1.36, help="ms per pixel baseline")
     p.add_argument("--interval", type=float, default=2.05, help="seconds to wait after each jump")
     p.add_argument("--max-jumps", type=int, default=0, help="0 means unlimited")
+    p.add_argument("--no-adapt", action="store_true", help="disable online coefficient calibration")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--debug-dir", default="debug_jump_ppo")
     args = p.parse_args()
@@ -354,8 +394,10 @@ def main() -> None:
     debug_dir = Path(args.debug_dir)
     debug_dir.mkdir(parents=True, exist_ok=True)
 
+    coef = args.coef
     jumps = 0
     idle_retries = 0
+    prev_jump: JumpRecord | None = None
     while args.max_jumps <= 0 or jumps < args.max_jumps:
         img = capture_screen(args.serial)
         arr = np.array(img)
@@ -370,6 +412,12 @@ def main() -> None:
                 time.sleep(1.5 if idle_retries > 1 else 1.0)
             continue
 
+        if prev_jump is not None and not args.no_adapt:
+            coef, calib_msg = update_coef_from_landing(coef, prev_jump, piece)
+            if calib_msg:
+                print(calib_msg)
+            prev_jump = None
+
         target = find_target(arr, piece)
         if target is None:
             print(f"[{jumps}] target not found, waiting")
@@ -383,12 +431,12 @@ def main() -> None:
         action = int(agent.act(obs, deterministic=True))
         pred_dist = action_to_distance(action)
         scale = pred_dist / max(gap_world, 1e-6)
-        press_ms = int(round(np.clip(args.coef * gap_px * scale, 220, 1250)))
+        press_ms = int(round(np.clip(coef * gap_px * scale, 220, 1250)))
 
         text = (
             f"jump={jumps + 1} gap_px={gap_px:.1f} half_px={target.half_width_px:.1f} "
             f"gap_w={gap_world:.2f} half_w={half_world:.2f} action={action} "
-            f"pred={pred_dist:.2f} scale={scale:.3f} press={press_ms}ms"
+            f"pred={pred_dist:.2f} scale={scale:.3f} coef={coef:.4f} press={press_ms}ms"
         )
         print(text)
         save_debug_image(img, debug_dir / f"{jumps:04d}.png", piece, target, text)
@@ -397,6 +445,7 @@ def main() -> None:
             break
 
         long_press(args.serial, w // 2, int(h * 0.75), press_ms)
+        prev_jump = JumpRecord(piece=piece, target=target, gap_px=gap_px, press_ms=press_ms)
         jumps += 1
         time.sleep(args.interval)
 
