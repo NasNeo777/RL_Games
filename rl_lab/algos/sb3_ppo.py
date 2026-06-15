@@ -82,12 +82,20 @@ class SB3PPOAgent(BaseAgent):
         n_envs = getattr(args, "n_envs", 0) \
             or (self.N_ENVS_IMAGE if image_obs else 1)
         if n_envs > 1:
-            # 多环境并行采样:图像环境单局慢,靠并行喂饱大 rollout
-            from stable_baselines3.common.vec_env import SubprocVecEnv
-            venv = SubprocVecEnv([
-                partial(_make_sb3_env, args.env, (args.seed or 0) + i)
-                for i in range(n_envs)])
-            print(f"并行采样: SubprocVecEnv x {n_envs}")
+            # 多环境并行采样。重型环境(如 mario,单步慢)用子进程真并行;
+            # 轻量环境(env.parallel_mode == "dummy",如 jump_pixels)单步极快,
+            # 子进程间传 84×84 图像的 IPC 开销反而比计算还大,改用同进程
+            # DummyVecEnv,吞吐能高一个数量级。
+            from stable_baselines3.common.vec_env import (
+                DummyVecEnv, SubprocVecEnv)
+            factories = [partial(_make_sb3_env, args.env, (args.seed or 0) + i)
+                         for i in range(n_envs)]
+            if getattr(env, "parallel_mode", "subproc") == "dummy":
+                venv = DummyVecEnv(factories)
+                print(f"并行采样: DummyVecEnv x {n_envs}(同进程)")
+            else:
+                venv = SubprocVecEnv(factories)
+                print(f"并行采样: SubprocVecEnv x {n_envs}")
         else:
             venv = Monitor(BaseEnvToGym(env))
 

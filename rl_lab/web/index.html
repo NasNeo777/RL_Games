@@ -472,45 +472,55 @@ const RENDERERS = {
     const nf = frames[fIdx + 1];           // 下一帧,用来提前画出即将滑入的新台子
     const CHARGE_END = 0.24, JUMP_END = 0.66;
     const ease = t => t * t * (3 - 2 * t);
+    const lerp = (a, b, t) => a + (b - a) * t;
     ctx.clearRect(0, 0, W, H);
     // 暖粉灰背景
     const bg = ctx.createLinearGradient(0, 0, 0, H);
     bg.addColorStop(0, "#d8bab7"); bg.addColorStop(1, "#c39d9a");
     ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
 
-    const standing = Math.abs(f.x1 - f.x0) < 1e-6;
-    const dist = f.x1 - f.x0;
+    // 世界坐标 (a,b):+a=右前轴,+b=左前轴;两条等距斜轴让路线左右拐
+    const p0 = f.p0, p1 = f.p1, land = f.land;   // [a, b, half]
+    const dist = Math.abs(land[0] - p0[0]) + Math.abs(land[1] - p0[1]);
+    const standing = dist < 1e-6;
     const powerN = Math.max(0, Math.min(1,
       (dist - spec.d_min) / (spec.d_max - spec.d_min)));
 
-    // 等距投影:进度坐标 s → 屏幕。锚点固定在偏左下,当前台子停在那里。
-    const STEP_X = W * 0.15, STEP_Y = W * 0.075;   // 每 1 进度单位的屏幕位移
-    const SCALE = W * 0.13;                         // 半宽 → 台面菱形横向半径
-    const anchorX = W * 0.36, anchorY = H * 0.70;
-    // 镜头中心(进度坐标):蓄力/起跳阶段锁在起跳台;落定后平移到目标台。
-    let camS = f.x0;
-    if (!standing && f.ok && frac > JUMP_END)
-      camS = f.x0 + dist * ease((frac - JUMP_END) / (1 - JUMP_END));
-    const proj = s => [anchorX + (s - camS) * STEP_X, anchorY - (s - camS) * STEP_Y];
+    // 等距投影 (a,b)→屏幕,锚点固定在偏左下;镜头中心 (ca,cb) 锁当前台,落定后平移到目标台
+    const STEP_X = W * 0.15, STEP_Y = W * 0.075, SCALE = W * 0.13;
+    const anchorX = W * 0.42, anchorY = H * 0.70;
+    let ca = p0[0], cb = p0[1];
+    if (!standing && f.ok && frac > JUMP_END) {
+      const e = ease((frac - JUMP_END) / (1 - JUMP_END));
+      ca = lerp(p0[0], p1[0], e); cb = lerp(p0[1], p1[1], e);
+    }
+    const proj = (a, b) => [
+      anchorX + ((a - ca) - (b - cb)) * STEP_X,
+      anchorY - ((a - ca) + (b - cb)) * STEP_Y];
 
-    const theme = shape => shape === 1
-      ? { top: "#e6ebed", lft: "#f3f6f7", rgt: "#bcc6ca", ring: "#9aa6ab" }  // 圆台:灰白
-      : { top: "#3a8059", lft: "#eef3f3", rgt: "#cdd7d8", ring: null };      // 方台:绿
+    // 底座样式表(需与 envs/jump.py 的 N_STYLES 一致):方块 / 圆柱,各色,外加灰条纹高台
+    const STYLES = [
+      { top: "#3a8059", lft: "#eef3f3", rgt: "#cdd7d8" },                          // 绿方
+      { round: 1, top: "#e6ebed", lft: "#f3f6f7", rgt: "#bcc6ca", ring: "#9aa6ab" }, // 白圆
+      { top: "#3f7cc0", lft: "#eef2f6", rgt: "#cbd4dd" },                          // 蓝方
+      { top: "#d98a4f", lft: "#f4ece4", rgt: "#ddccbb" },                          // 橙方
+      { round: 1, top: "#a673c8", lft: "#f0ecf4", rgt: "#c9bcd4", ring: "#7f55a0" }, // 紫圆
+      { top: "#8a9099", lft: "#e9edf0", rgt: "#c2c9cf", stripes: 1, tall: 1 },     // 灰条纹高台
+    ];
 
-    function platform(center, half, shape) {
-      const [cx, cy] = proj(center);
-      const rx = half * SCALE, ry = rx * 0.5;          // 2:1 等距
-      const h = Math.max(rx * 1.05, W * 0.045);        // 柱高
-      const c = theme(shape);
+    function platform(center, style) {
+      const [cx, cy] = proj(center[0], center[1]);
+      const rx = center[2] * SCALE, ry = rx * 0.5;     // 2:1 等距
+      const c = STYLES[((style % STYLES.length) + STYLES.length) % STYLES.length];
+      const h = Math.max(rx * 1.05, W * 0.045) * (c.tall ? 1.7 : 1);
       ctx.fillStyle = "rgba(60,30,40,.18)";            // 地面软阴影
       ctx.beginPath();
       ctx.ellipse(cx + rx * 0.35, cy + h + ry * 0.6, rx * 1.15, ry * 1.15, 0, 0, 7);
       ctx.fill();
-      if (shape === 1) {                                // 圆柱
+      if (c.round) {                                    // 圆柱
         ctx.fillStyle = c.rgt;
         ctx.beginPath();
-        ctx.moveTo(cx - rx, cy);
-        ctx.lineTo(cx - rx, cy + h);
+        ctx.moveTo(cx - rx, cy); ctx.lineTo(cx - rx, cy + h);
         ctx.ellipse(cx, cy + h, rx, ry, 0, Math.PI, 0, true);
         ctx.lineTo(cx + rx, cy);
         ctx.closePath(); ctx.fill();
@@ -530,6 +540,15 @@ const RENDERERS = {
         ctx.moveTo(R[0], R[1]); ctx.lineTo(B[0], B[1]);
         ctx.lineTo(B[0], B[1] + h); ctx.lineTo(R[0], R[1] + h);
         ctx.closePath(); ctx.fill();
+        if (c.stripes) {                                // 横向条纹
+          ctx.strokeStyle = "rgba(0,0,0,.16)"; ctx.lineWidth = Math.max(2, h * 0.12);
+          for (const k of [0.33, 0.66]) {
+            const yk = h * k;
+            ctx.beginPath();
+            ctx.moveTo(L[0], L[1] + yk); ctx.lineTo(B[0], B[1] + yk);
+            ctx.lineTo(R[0], R[1] + yk); ctx.stroke();
+          }
+        }
         ctx.fillStyle = c.top;                          // 顶面
         ctx.beginPath();
         ctx.moveTo(T[0], T[1]); ctx.lineTo(R[0], R[1]);
@@ -539,41 +558,43 @@ const RENDERERS = {
       return [cx, cy, rx, ry];
     }
 
-    // 由远及近画:下一块新台子(滑入)→ 目标台 → 起跳台,近台压住远台
-    if (nf && Math.abs(nf.p1[0] - f.p1[0]) > 1e-6) platform(nf.p1[0], nf.p1[1], nf.s1);
-    platform(f.p1[0], f.p1[1], f.s1);
-    const [, , rx0, ry0] = platform(f.p0[0], f.p0[1], f.s0);
+    // 由远及近画(深度 = a+b,越大越远):新台子(滑入)→ 目标台 → 起跳台
+    if (nf && (Math.abs(nf.p1[0] - p1[0]) > 1e-6 || Math.abs(nf.p1[1] - p1[1]) > 1e-6))
+      platform(nf.p1, nf.s1);
+    platform(p1, f.s1);
+    const [, , rx0, ry0] = platform(p0, f.s0);
 
     // 正中靶心:目标台心冒颗星(随镜头一起动)
     if (f.perfect) {
-      const [tx, ty] = proj(f.p1[0]);
+      const [tx, ty] = proj(p1[0], p1[1]);
       ctx.fillStyle = "#ffd54f"; ctx.font = `bold ${Math.round(W * 0.04)}px sans-serif`;
       ctx.textAlign = "center";
       ctx.fillText("★", tx, ty + W * 0.012);
       ctx.textAlign = "left";
     }
 
-    // 棋子位置 + 形变:三段。ps=当前进度坐标,lift=离地高度(像素)
-    const apex = W * 0.10 + 0.32 * Math.abs(dist) * STEP_X;
-    let ps = f.x0, lift = 0, sx = 1, sy = 1;
+    // 棋子位置 + 形变:蓄力 → 起跳(飞到实际落点)→ 落定(贴目标台心,镜头平移)
+    const apex = W * 0.10 + 0.32 * dist * STEP_X;
+    let pa = p0[0], pb = p0[1], lift = 0, sx = 1, sy = 1;
     if (standing) {                          // 开局静止帧:站在起跳台
-      // ps/lift 取默认值
+      // 取默认值
     } else if (frac < CHARGE_END) {          // ① 蓄力:下压,力度越大压越狠
       const ct = frac / CHARGE_END;
       sy = 1 - 0.34 * powerN * ct; sx = 1 + 0.20 * powerN * ct;
-    } else if (f.ok && frac < JUMP_END) {    // ② 起跳:抛物线飞向目标
+    } else if (f.ok && frac < JUMP_END) {    // ② 起跳:抛物线飞向实际落点
       const jt = (frac - CHARGE_END) / (JUMP_END - CHARGE_END);
-      ps = f.x0 + dist * jt;
+      pa = lerp(p0[0], land[0], jt); pb = lerp(p0[1], land[1], jt);
       lift = apex * Math.sin(Math.PI * jt);
-    } else if (f.ok) {                        // ③ 落定:棋子贴目标台,镜头平移把它拉回锚点
-      ps = f.x1;
+    } else if (f.ok) {                        // ③ 落定:从落点稳到台心,镜头同步平移回锚点
+      const pt = ease((frac - JUMP_END) / (1 - JUMP_END));
+      pa = lerp(land[0], p1[0], pt); pb = lerp(land[1], p1[1], pt);
     } else {                                  // 失败:冲出去栽进缝里
       const jt = (frac - CHARGE_END) / (1 - CHARGE_END);
-      ps = f.x0 + dist * jt;
+      pa = lerp(p0[0], land[0], jt); pb = lerp(p0[1], land[1], jt);
       lift = apex * Math.sin(Math.PI * jt)
            - (jt > 0.55 ? (jt - 0.55) / 0.45 * H * 0.6 : 0);
     }
-    const [bx, footY] = proj(ps);
+    const [bx, footY] = proj(pa, pb);
     const by = footY - lift;
 
     // 落地影子(贴地时清晰,腾空时缩小变淡)

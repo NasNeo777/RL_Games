@@ -19,6 +19,9 @@ class BaseEnv:
     # 图像观测的环境设置成 (通道, 高, 宽),观测为 uint8;
     # 向量观测的环境保持 None(观测为 obs_dim 维 float32)
     obs_shape: tuple = None
+    # SB3 PPO 多环境并行的方式:"subproc"(子进程真并行,适合单步重的环境)
+    # 或 "dummy"(同进程,适合单步极轻、IPC 开销占主导的环境)
+    parallel_mode: str = "subproc"
 
     def __init__(self):
         self.record = False
