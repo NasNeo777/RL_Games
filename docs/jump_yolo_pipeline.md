@@ -197,10 +197,35 @@
 
 ---
 
+## 7.5 真机在线训练(可选,DQN 自学力度)
+
+线性公式靠 `coef` 拍脑袋。想让它**自己在真机上学**「距离→按压时间」,用
+`adb_jump_dqn.py`:边玩边读屏幕分数当奖励,摔死(分数归零)就惩罚重开。
+
+```bash
+# (一次性)标定分数区域 + 数字模板:裁图供人工标成 tools/score_digits/0.png..9.png
+.venv/bin/python adb_jump_dqn.py --serial <serial> --calibrate-score
+
+# 真机开练(没标定分数也能跑:退化为「存活一跳 +1」奖励)
+.venv/bin/python adb_jump_dqn.py --serial <serial> \
+  --yolo-model runs/detect/runs/jump_yolo_synth/weights/best.pt --episodes 200
+```
+
+- **观测** = 棋子落脚点到目标台中心的像素距离(1 维归一化)
+- **动作** = 按压时间档位(`--levels` 档,`--press-min`/`--press-max` 之间)
+- **奖励** = 屏幕分数增量(读得到时,自带连击 +2);**摔死** = 分数归零或检测不到棋子 → `-死亡惩罚`,重开
+- **产物** = `runs/jump_real_dqn/{best,latest}.pt`,`--resume` 续训
+
+> 真机每步就是一次真跳,样本极少,所以 DQN 的 warmup/ε 衰减都调得很短。
+> 分数读取用 cv2 模板匹配(不依赖系统 OCR),模板缺失时自动退化为存活计数。
+
+---
+
 ## 8. 文件地图(放哪、生成啥)
 
 ```
-adb_jump_ppo.py                 真机主程序:截图→检测→决策→长按
+adb_jump_ppo.py                 真机主程序(线性公式):截图→检测→决策→长按
+adb_jump_dqn.py                 真机在线 DQN 训练(读屏幕分数当奖励)
 run_labelme.sh                  启动 labelme 标注
 tools/
   gen_synthetic_jump.py         ① 生成合成数据集(推荐)
