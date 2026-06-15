@@ -312,7 +312,7 @@ def find_target(arr: np.ndarray, piece: Piece) -> Target | None:
     )
 
 
-def synthetic_obs(gap_px: float, half_width_px: float, screen_w: int) -> tuple[np.ndarray, float, float]:
+def estimate_world_state(gap_px: float, half_width_px: float, screen_w: int) -> tuple[float, float]:
     gap_world = float(
         np.clip(
             np.interp(gap_px, [screen_w * 0.12, screen_w * 0.48], [GAP_MIN, GAP_MAX]),
@@ -327,6 +327,11 @@ def synthetic_obs(gap_px: float, half_width_px: float, screen_w: int) -> tuple[n
             HALF_MAX,
         )
     )
+    return gap_world, half_world
+
+
+def synthetic_obs(gap_px: float, half_width_px: float, screen_w: int) -> tuple[np.ndarray, float, float]:
+    gap_world, half_world = estimate_world_state(gap_px, half_width_px, screen_w)
     env = JumpPixelsEnv()
     env.a = env.b = 0.0
     env.cur_half = 0.4
@@ -334,6 +339,17 @@ def synthetic_obs(gap_px: float, half_width_px: float, screen_w: int) -> tuple[n
     env.next_b = 0.0
     env.next_half = half_world
     return env._obs(), gap_world, half_world
+
+
+def vector_obs(gap_px: float, half_width_px: float, screen_w: int) -> tuple[np.ndarray, float, float]:
+    gap_world, half_world = estimate_world_state(gap_px, half_width_px, screen_w)
+    gap_mid, gap_amp = (GAP_MIN + GAP_MAX) / 2, (GAP_MAX - GAP_MIN) / 2
+    half_mid, half_amp = (HALF_MIN + HALF_MAX) / 2, (HALF_MAX - HALF_MIN) / 2
+    obs = np.array([
+        (gap_world - gap_mid) / gap_amp,
+        (half_world - half_mid) / half_amp,
+    ], dtype=np.float32)
+    return obs, gap_world, half_world
 
 
 def action_to_distance(action: int) -> float:
@@ -451,7 +467,7 @@ def stable_detect(
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--serial", help="adb serial; default uses the only attached device")
-    p.add_argument("--ckpt", default="runs/jump_pixels_ppo/best.pt")
+    p.add_argument("--ckpt", default="runs/jump_dqn/best.pt")
     p.add_argument("--coef", type=float, default=1.36, help="ms per pixel baseline")
     p.add_argument("--interval", type=float, default=2.05, help="seconds to wait after each jump")
     p.add_argument("--max-jumps", type=int, default=0, help="0 means unlimited")
@@ -463,7 +479,8 @@ def main() -> None:
     args = p.parse_args()
 
     _, agent, ckpt = load_agent_for_demo(args.ckpt)
-    print(f"loaded {args.ckpt} ({ckpt['env']} / {ckpt['algo']})")
+    obs_mode = "image" if ckpt.get("env") == "jump_pixels" or ckpt.get("algo") == "ppo" else "vector"
+    print(f"loaded {args.ckpt} ({ckpt['env']} / {ckpt['algo']} / {obs_mode})")
 
     debug_dir = Path(args.debug_dir)
     debug_dir.mkdir(parents=True, exist_ok=True)
@@ -508,7 +525,10 @@ def main() -> None:
 
         idle_retries = 0
         gap_px = math.hypot(target.x - piece.x, target.y - piece.y)
-        obs, gap_world, half_world = synthetic_obs(gap_px, target.half_width_px, w)
+        if obs_mode == "vector":
+            obs, gap_world, half_world = vector_obs(gap_px, target.half_width_px, w)
+        else:
+            obs, gap_world, half_world = synthetic_obs(gap_px, target.half_width_px, w)
         action = int(agent.act(obs, deterministic=True))
         pred_dist = action_to_distance(action)
         scale = pred_dist / max(gap_world, 1e-6)
@@ -517,7 +537,7 @@ def main() -> None:
         text = (
             f"jump={jumps + 1} gap_px={gap_px:.1f} half_px={target.half_width_px:.1f} "
             f"gap_w={gap_world:.2f} half_w={half_world:.2f} action={action} "
-            f"pred={pred_dist:.2f} scale={scale:.3f} coef={coef:.4f} "
+            f"pred={pred_dist:.2f} scale={scale:.3f} coef={coef:.4f} mode={obs_mode} "
             f"obs={valid_obs}/{max(1, args.captures)} press={press_ms}ms"
         )
         print(text)
