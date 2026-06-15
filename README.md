@@ -158,7 +158,7 @@ NO_OPEN=1 ./start.sh
 ### 🤖 附加件:跳一跳真机部署(单个环境的额外能力)
 
 > 这是 **`jump` 这一个环境** 的真机落地附加件,**不是项目主体**。把训练好的
-> 跳一跳 agent 部署到真手机:截图 → YOLO 检测棋子/台子 → PPO 决定力度 → adb 长按。
+> 跳一跳部署到真手机:截图 → YOLO 检测棋子/台子 → 线性公式定蓄力(`ms = 1.35 × 像素距离`)→ adb 长按。
 > 完整步骤、输入输出、排错见 **[docs/jump_yolo_pipeline.md](docs/jump_yolo_pipeline.md)**,
 > 工具索引见 **[tools/README.md](tools/README.md)**。
 

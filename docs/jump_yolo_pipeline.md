@@ -1,4 +1,4 @@
-# 跳一跳真机部署:YOLO 检测 + PPO 决策流水线
+# 跳一跳真机部署:YOLO 检测 + 线性蓄力流水线
 
 > 这是 **单个环境(`jump`)的真机落地附加件**,不是项目主体。
 > 项目主体是 `rl_lab/` 多环境强化学习实验室(见 [根 README](../README.md))。
@@ -14,7 +14,7 @@
  手机截图 ──▶ ① YOLO 检测 ──▶ piece(棋子) + landing(台子) 的像素框
                                    │
                                    ▼
-                         ② 几何换算 + PPO 决策 ──▶ 蓄力时长(ms)
+                  ② 线性公式  press_ms = coef × gap_px  ──▶ 蓄力时长(ms)
                                    │
                                    ▼
                             ③ adb 长按 ──▶ 跳!
@@ -22,9 +22,13 @@
 
 - **① 检测**:`adb_jump_ppo.py` 里的 `YoloJumpDetector`,识别棋子和台子。
   多个台子时**选最上面那个**作为目标;棋子位置取**落脚点中心**(底边中心)。
-- **② 决策**:把像素缺口换算成 world 量纲,喂给跳一跳的 PPO/DQN 检查点
-  得到力度,`press_ms = coef × gap_px × scale`。
+- **② 决策**:微信跳一跳经验公式——蓄力毫秒 = 棋子落脚点到目标台中心的
+  像素距离 `gap_px` × 系数 `coef`(默认 **1.35**)。纯线性,**不需要 PPO/检查点**。
 - **③ 执行**:`adb shell input swipe`(同点长按)蓄力。
+
+> 早期版本绕道"world 量纲换算 + PPO 预测力度 + scale"和卡尔曼/在线校准,
+> 反而不准(PPO 只学会"落在台面",力度在容差内晃)。现已全部移除,回归
+> 这条干净的线性公式。
 
 检测器训不好,整条链就废(模型会一直 `detect → None, None`)。所以
 **本文档的重点是怎么得到一个靠谱的 YOLO 检测器**。
@@ -38,7 +42,6 @@
 | Python venv | 项目自带 `.venv` | 见根 README |
 | ultralytics | YOLO 训练/推理 | `.venv/bin/pip install ultralytics` |
 | `yolo11n.pt` | YOLO11-nano 预训练权重(迁移起点) | 已在仓库根目录 |
-| 跳一跳 agent 检查点 | 决定力度的 PPO/DQN 模型 | `./start.sh --env jump --algo ppo` 训练得到,落在 `runs/jump_ppo/best.pt` |
 | adb + 安卓手机 | 真机截图与长按(仅真机运行时需要) | 系统装 `adb`,手机开 USB 调试 |
 | labelme(可选) | 仅"真图标注"路线需要 | `.venv/bin/pip install labelme` |
 
@@ -171,7 +174,6 @@
 ```bash
 .venv/bin/python adb_jump_ppo.py \
   --serial <adb-serial> \
-  --ckpt runs/jump_ppo/best.pt \
   --yolo-model runs/detect/runs/jump_yolo_synth/weights/best.pt
 
 # 只测一帧检测、不真按(验证检测器):加 --dry-run
@@ -186,12 +188,12 @@
 |---|---|---|
 | `--detector` | `yolo` | `yolo`/`heuristic`/`auto`(auto 缺模型时回退规则检测) |
 | `--yolo-conf` | 0.25 | 检测置信度阈值 |
-| `--coef` | 1.36 | 蓄力基准 ms/像素(线性力度系数) |
+| `--coef` | 1.35 | 蓄力系数 ms/像素(`press_ms = coef × gap_px`) |
 | `--dry-run` | — | 只检测+存调试图,不真按 |
 | `--max-jumps` | 0 | 0 = 不限 |
 
-> 注:旧版的卡尔曼多帧融合、在线系数校准已**移除**,现在是单帧检测 + 固定
-> `coef`,逻辑更直白。决策仍走跳一跳 PPO/DQN 检查点(`scale` 项)。
+> 注:卡尔曼多帧融合、在线系数校准、PPO/world 换算均已**移除**。现在是
+> 单帧检测 + 纯线性公式 `press_ms = coef × gap_px`,跳得太远/太近就调 `--coef`。
 
 ---
 
