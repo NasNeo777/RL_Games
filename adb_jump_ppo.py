@@ -198,8 +198,12 @@ def grow_region(
 
 def find_target(arr: np.ndarray, piece: Piece) -> Target | None:
     h, w, _ = arr.shape
-    bg = np.median(arr[:300, :300].reshape(-1, 3), axis=0)
-    bg_dist = np.sqrt(((arr.astype(np.float32) - bg) ** 2).sum(axis=2))
+    arrf = arr.astype(np.float32)
+    # The real game background has a gentle vertical gradient. Use a per-row
+    # bright-percentile estimate instead of one fixed color, otherwise darker
+    # targets on lower rows blend into the background model.
+    bg_rows = np.percentile(arrf, 90, axis=1)
+    bg_dist = np.sqrt(((arrf - bg_rows[:, None, :]) ** 2).sum(axis=2))
     mask = bg_dist > 18
 
     px0, py0, px1, py1 = piece.bbox
@@ -251,7 +255,7 @@ def find_target(arr: np.ndarray, piece: Piece) -> Target | None:
             continue
         x_abs = max(rx0, min(rx1 - 1, sx_abs))
         px = arr[y_abs, x_abs].astype(np.int16)
-        score = float(np.linalg.norm(px - bg))
+        score = float(np.linalg.norm(px - bg_rows[y_abs]))
         if score > best_score:
             best_score = score
             best_seed = (x_abs, y_abs)
