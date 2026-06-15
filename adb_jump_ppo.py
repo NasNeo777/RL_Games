@@ -517,28 +517,6 @@ def update_coef_from_landing(coef: float, prev: JumpRecord, current_piece: Piece
     return new_coef, msg
 
 
-def landing_looks_valid(prev: JumpRecord, current_piece: Piece) -> bool:
-    start = np.array([prev.piece.x, prev.piece.y], dtype=np.float32)
-    target = np.array([prev.target.x, prev.target.y], dtype=np.float32)
-    actual = np.array([current_piece.x, current_piece.y], dtype=np.float32)
-    jump_vec = target - start
-    jump_len = float(np.linalg.norm(jump_vec))
-    if jump_len < 1e-6:
-        return False
-
-    unit = jump_vec / jump_len
-    delta = actual - start
-    actual_proj = float(np.dot(delta, unit))
-    actual_proj = float(np.clip(actual_proj, jump_len * 0.5, jump_len * 1.5))
-    landing_err = float(np.linalg.norm(actual - target))
-    perp_err = float(np.linalg.norm(delta - unit * actual_proj))
-    return (
-        perp_err <= max(90.0, prev.target.half_width_px * 1.55)
-        and jump_len * 0.76 <= actual_proj <= jump_len * 1.24
-        and landing_err <= max(120.0, prev.target.half_width_px * 1.8)
-    )
-
-
 def long_press(serial: str | None, x: int, y: int, ms: int) -> None:
     adb_run(serial, "shell", "input", "swipe", str(x), str(y), str(x + 1), str(y + 1), str(ms))
 
@@ -722,8 +700,6 @@ def main() -> None:
     frame_idx = 0
     idle_retries = 0
     prev_jump: JumpRecord | None = None
-    pending_raw: Image.Image | None = None
-    pending_raw_idx: int | None = None
     last_jump_time: float | None = None
     while args.max_jumps <= 0 or jumps < args.max_jumps:
         img, arr, piece, target, valid_obs = stable_detect(
@@ -737,8 +713,6 @@ def main() -> None:
             if last_jump_time is not None and time.time() - last_jump_time < args.ready_timeout:
                 time.sleep(args.poll_delay)
                 continue
-            pending_raw = None
-            pending_raw_idx = None
             idle_retries += 1
             print(f"[{jumps}] piece not found, tap to (re)start")
             save_debug_image(img, debug_dir / f"{jumps:04d}_no_piece.png", None, None, "piece not found")
@@ -747,16 +721,10 @@ def main() -> None:
                 time.sleep(1.5 if idle_retries > 1 else 1.0)
             continue
 
-        if prev_jump is not None:
-            landed_ok = landing_looks_valid(prev_jump, piece)
-            if landed_ok and pending_raw is not None and pending_raw_idx is not None:
-                save_raw_image(pending_raw, raw_dir, pending_raw_idx)
-            pending_raw = None
-            pending_raw_idx = None
-            if landed_ok and not args.no_adapt:
-                coef, calib_msg = update_coef_from_landing(coef, prev_jump, piece)
-                if calib_msg:
-                    print(calib_msg)
+        if prev_jump is not None and not args.no_adapt:
+            coef, calib_msg = update_coef_from_landing(coef, prev_jump, piece)
+            if calib_msg:
+                print(calib_msg)
             prev_jump = None
         if target is not None:
             last_jump_time = None
@@ -765,8 +733,6 @@ def main() -> None:
             if last_jump_time is not None and time.time() - last_jump_time < args.ready_timeout:
                 time.sleep(args.poll_delay)
                 continue
-            pending_raw = None
-            pending_raw_idx = None
             print(f"[{jumps}] target not found, waiting")
             save_debug_image(
                 img,
@@ -796,14 +762,13 @@ def main() -> None:
             f"obs={valid_obs}/{max(1, args.captures)} press={press_ms}ms"
         )
         print(text)
+        save_raw_image(img, raw_dir, frame_idx)
+        frame_idx += 1
         save_debug_image(img, debug_dir / f"{jumps:04d}.png", piece, target, text)
 
         if args.dry_run:
             break
 
-        pending_raw = img.copy()
-        pending_raw_idx = frame_idx
-        frame_idx += 1
         long_press(args.serial, w // 2, int(h * 0.75), press_ms)
         prev_jump = JumpRecord(piece=piece, target=target, gap_px=gap_px, press_ms=press_ms)
         jumps += 1
