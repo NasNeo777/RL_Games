@@ -260,6 +260,12 @@ def train(env: RealJumpEnv, agent, episodes: int, out_dir: Path, save_every: int
     best_return = float("-inf")
     best_score = 0
     bar = "─" * 56
+
+    def _save(name):                              # 连 ε 进度(steps/updates)一起存
+        agent.save(out_dir / name, env_name="jump_real",
+                   extra={"steps": getattr(agent, "steps", 0),
+                          "updates": getattr(agent, "updates", 0)})
+
     mode = (f"暖启动探索(coef={warmup_coef}±{warmup_window}档)"
             if warmup_coef > 0 else "纯随机探索")
     print(f"\n{bar}\n  真机在线 DQN · 跳一跳   →  {out_dir}\n  {mode}\n{bar}")
@@ -271,22 +277,26 @@ def train(env: RealJumpEnv, agent, episodes: int, out_dir: Path, save_every: int
         ep_return, steps = 0.0, 0
         while True:
             dist_px = float(obs[2]) * (env.W or 1080)   # obs = [框宽, 框高, 距离]
-            # 探索时围绕线性估计取档(暖启动),否则用 DQN 贪心;
-            # warmup_coef<=0 时退回 agent 自带的纯随机 ε-贪心。
-            if warmup_coef > 0 and rng.random() < getattr(agent, "epsilon", 0.05):
+            # 自己做 ε 分支:便于标注「探索/利用」,也保证 ε 可续训。
+            #   探索:暖启动时取线性估计档 ±window;否则全档随机。利用:DQN 贪心。
+            explore = rng.random() < getattr(agent, "epsilon", 0.05)
+            if explore and warmup_coef > 0:
                 base = env.linear_action(dist_px, warmup_coef)
                 action = int(np.clip(base + rng.integers(-warmup_window, warmup_window + 1),
                                      0, env.n_actions - 1))
+            elif explore:
+                action = int(rng.integers(env.n_actions))
             else:
-                action = int(agent.act(obs, deterministic=warmup_coef > 0))
+                action = int(agent.act(obs, deterministic=True))
             next_obs, reward, terminated, truncated, info = env.step(action)
             agent.observe(obs, action, reward, next_obs, terminated, truncated)
             agent.update()
             obs = next_obs
             ep_return += reward
             steps += 1
+            src = "🎲 探索" if explore else "🧠 利用"
             mark = "💀 摔死" if info.get("died") else f"✅ +{reward:.0f}"
-            print(f"     跳{steps:<3d}  距 {dist_px:4.0f}px  按 {info['press_ms']:4d}ms   {mark}")
+            print(f"     跳{steps:<3d}  距 {dist_px:4.0f}px  按 {info['press_ms']:4d}ms  {src}  {mark}")
             if truncated and not terminated:     # 没台子等一下重新观测,不算死
                 got = env.reset()
                 if got is None:
@@ -299,13 +309,13 @@ def train(env: RealJumpEnv, agent, episodes: int, out_dir: Path, save_every: int
         new_best = ep_return > best_return
         if new_best:
             best_return = ep_return
-            agent.save(out_dir / "best.pt", env_name="jump_real")
+            _save("best.pt")
         flag = "🏆" if new_best else "  "
         print(f"{flag} 第 {ep:<5d} 局 │ 步 {steps:<3d} │ 本局分 {env.prev_score:<3d} │ "
               f"回报 {ep_return:6.1f} │ ε {getattr(agent, 'epsilon', 0):.2f} │ 最高分 {best_score}")
         if ep % save_every == 0:
-            agent.save(out_dir / "latest.pt", env_name="jump_real")
-    agent.save(out_dir / "latest.pt", env_name="jump_real")
+            _save("latest.pt")
+    _save("latest.pt")
     print(f"{bar}\n  训练结束 → {out_dir}\n{bar}")
 
 
@@ -370,7 +380,10 @@ def main() -> None:
         from rl_lab.algos.base import BaseAgent
         sd = BaseAgent.load_checkpoint(out_dir / "latest.pt")
         agent.load_state_dict(sd["state_dict"] if "state_dict" in sd else sd)
-        print(f"从 {out_dir/'latest.pt'} 续训")
+        extra = sd.get("extra", {}) if isinstance(sd, dict) else {}
+        agent.steps = int(extra.get("steps", 0))         # 续上 ε 衰减进度
+        agent.updates = int(extra.get("updates", 0))
+        print(f"从 {out_dir/'latest.pt'} 续训(step={agent.steps}, ε={getattr(agent,'epsilon',0):.2f})")
 
     train(env, agent, args.episodes, out_dir, args.save_every,
           warmup_coef=args.warmup_coef, warmup_window=args.warmup_window)
