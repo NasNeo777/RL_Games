@@ -94,7 +94,132 @@ def build_layers(rng, base, total_h):
     return layers or [(total_h, base)]
 
 
-def draw_cuboid(draw, rng, cx, cy, rx, total_h, base):
+# --- decorations -----------------------------------------------------------
+# Real platforms carry surface decorations (cute faces, LED clocks, express-box
+# logos, knobs, ring lids...). We render each on a flat RGBA tile, then warp it
+# onto a face/top quad in perspective so it sits on the surface realistically.
+
+def _find_coeffs(dst, src):
+    m = []
+    for (dx, dy), (sx, sy) in zip(dst, src):
+        m.append([dx, dy, 1, 0, 0, 0, -sx * dx, -sx * dy])
+        m.append([0, 0, 0, dx, dy, 1, -sy * dx, -sy * dy])
+    A = np.array(m, dtype=np.float64)
+    b = np.array(src, dtype=np.float64).reshape(8)
+    return np.linalg.solve(A, b)
+
+
+def paste_quad(scene, tile, quad):
+    """Warp axis-aligned RGBA `tile` so its corners land on `quad`
+    ([tl, tr, br, bl] in scene coords) and composite it onto the scene."""
+    xs = [p[0] for p in quad]
+    ys = [p[1] for p in quad]
+    x0, y0 = int(math.floor(min(xs))), int(math.floor(min(ys)))
+    x1, y1 = int(math.ceil(max(xs))), int(math.ceil(max(ys)))
+    ow, oh = max(1, x1 - x0), max(1, y1 - y0)
+    dst = [(p[0] - x0, p[1] - y0) for p in quad]
+    src = [(0, 0), (tile.width, 0), (tile.width, tile.height), (0, tile.height)]
+    try:
+        coeffs = _find_coeffs(dst, src)
+    except np.linalg.LinAlgError:
+        return
+    warped = tile.transform((ow, oh), Image.PERSPECTIVE, coeffs, Image.BICUBIC)
+    scene.alpha_composite(warped, (x0, y0))
+
+
+def _qpt(corners, s, t):
+    tl, tr, br, bl = corners
+    return (tl[0] + s * (tr[0] - tl[0]) + t * (bl[0] - tl[0]),
+            tl[1] + s * (tr[1] - tl[1]) + t * (bl[1] - tl[1]))
+
+
+def _subquad(corners, s0, s1, t0, t1):
+    return [_qpt(corners, s0, t0), _qpt(corners, s1, t0),
+            _qpt(corners, s1, t1), _qpt(corners, s0, t1)]
+
+
+def tile_face(rng):
+    s = 200
+    t = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    d = ImageDraw.Draw(t)
+    ink = (28, 28, 34, 255)
+    er = rng.randint(20, 30)
+    ey = rng.randint(95, 120)
+    for ex in (70, 130):
+        d.ellipse([ex - er, ey - er, ex + er, ey + er], fill=ink)
+        d.ellipse([ex - er * 0.45, ey - er * 0.6, ex + er * 0.1, ey - er * 0.1],
+                  fill=(255, 255, 255, 230))
+    if rng.random() < 0.7:                       # pink cheeks
+        for ex in (52, 148):
+            d.ellipse([ex - 16, ey + 18, ex + 16, ey + 36], fill=(244, 150, 160, 150))
+    if rng.random() < 0.5:                       # tiny mouth
+        d.arc([88, ey + 6, 112, ey + 30], 20, 160, fill=ink, width=4)
+    return t
+
+
+def tile_clock(rng):
+    t = Image.new("RGBA", (240, 150), (0, 0, 0, 0))
+    d = ImageDraw.Draw(t)
+    d.rounded_rectangle([10, 10, 230, 140], radius=18, fill=(34, 30, 28, 255))
+    txt = rng.choice(["14:16", "08:42", "21:05", "12:00", "06:30"])
+    try:
+        d.text((40, 45), txt, fill=(247, 150, 60, 255))
+    except Exception:
+        pass
+    for i, x in enumerate(range(45, 210, 34)):   # faux LED segments
+        d.rectangle([x, 55, x + 18, 95], outline=(247, 150, 60, 220), width=5)
+    return t
+
+
+def tile_dot(rng):
+    s = 200
+    t = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    d = ImageDraw.Draw(t)
+    d.ellipse([60, 60, 150, 150], fill=(245, 245, 245, 235))
+    d.ellipse([95, 70, 120, 95], fill=(180, 180, 184, 235))
+    return t
+
+
+def tile_square(rng):
+    s = 160
+    t = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    ImageDraw.Draw(t).rounded_rectangle([30, 30, 130, 130], radius=14,
+                                        fill=(238, 238, 240, 235))
+    return t
+
+
+def tile_knob(rng):
+    s = 160
+    t = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    ImageDraw.Draw(t).ellipse([45, 45, 115, 115], fill=(238, 238, 240, 235))
+    return t
+
+
+def tile_rings(rng, base):
+    s = 220
+    t = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    d = ImageDraw.Draw(t)
+    c = s // 2
+    for i, r in enumerate(range(100, 30, -22)):
+        col = shade(base, 0.82 if i % 2 else 1.08) + (255,)
+        d.ellipse([c - r, c - r, c + r, c + r], fill=col)
+    return t
+
+
+def decorate_cuboid(im, rng, left_face, right_face, top, base):
+    r = rng.random()
+    if r < 0.32:
+        paste_quad(im, tile_face(rng), _subquad(right_face, 0.24, 0.86, 0.20, 0.78))
+    elif r < 0.48:
+        paste_quad(im, tile_clock(rng), _subquad(right_face, 0.30, 0.9, 0.22, 0.62))
+    elif r < 0.62:
+        paste_quad(im, tile_dot(rng), _subquad(right_face, 0.45, 0.85, 0.30, 0.78))
+    if rng.random() < 0.4:
+        kind = tile_square(rng) if rng.random() < 0.5 else tile_knob(rng)
+        paste_quad(im, kind, _subquad(left_face, 0.18, 0.6, 0.28, 0.78))
+
+
+def draw_cuboid(im, draw, rng, cx, cy, rx, total_h, base):
     """Square platform: top diamond + two stacked-slab side faces."""
     ry = rx * rng.uniform(0.48, 0.55)
     left_pt, right_pt, bot_pt = (cx - rx, cy), (cx + rx, cy), (cx, cy + ry)
@@ -111,6 +236,13 @@ def draw_cuboid(draw, rng, cx, cy, rx, total_h, base):
     top = diamond(cx, cy, rx, ry)
     draw.polygon(top, fill=base)
     draw.line([top[3], top[0], top[1]], fill=shade(base, 1.12), width=2)
+
+    # face quads ([tl, tr, br, bl]); height uses the FIRST main slab so the
+    # decoration sits on the coloured band, not across stripe seams.
+    bh = total_h
+    left_face = [left_pt, bot_pt, (bot_pt[0], bot_pt[1] + bh), (left_pt[0], left_pt[1] + bh)]
+    right_face = [bot_pt, right_pt, (right_pt[0], right_pt[1] + bh), (bot_pt[0], bot_pt[1] + bh)]
+    decorate_cuboid(im, rng, left_face, right_face, top, base)
     return int(cx - rx), int(cy - ry), int(cx + rx), int(cy + ry)
 
 
@@ -155,10 +287,16 @@ def draw_round(im, draw, rng, cx, cy, rx, total_h, base, ry_ratio):
 
     draw.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=base)
     draw.arc([cx - rx, cy - ry, cx + rx, cy + ry], 180, 360, fill=shade(base, 1.12), width=2)
+
+    # concentric ring lid on the top ellipse (like a medicine-box / manhole top)
+    if rng.random() < 0.35:
+        ring_base = rng.choice(TOP_COLORS)
+        top_quad = [(cx, cy - ry), (cx + rx, cy), (cx, cy + ry), (cx - rx, cy)]
+        paste_quad(im, tile_rings(rng, ring_base), top_quad)
     return int(cx - rx), int(cy - ry), int(cx + rx), int(cy + ry)
 
 
-def draw_table(draw, rng, cx, cy, rx, total_h, base):
+def draw_table(im, draw, rng, cx, cy, rx, total_h, base):
     """Table: a thin top slab on four legs. Landing = the tabletop surface."""
     ry = rx * rng.uniform(0.48, 0.55)
     top_thick = rng.uniform(18, 30)
@@ -193,8 +331,8 @@ def draw_platform(im, draw, rng, cx, cy, rx, total_h, shape) -> tuple[int, int, 
     if shape == "oval":
         return draw_round(im, draw, rng, cx, cy, rx, total_h, base, rng.uniform(0.30, 0.40))
     if shape == "table":
-        return draw_table(draw, rng, cx, cy, rx, total_h, base)
-    return draw_cuboid(draw, rng, cx, cy, rx, total_h, base)
+        return draw_table(im, draw, rng, cx, cy, rx, total_h, base)
+    return draw_cuboid(im, draw, rng, cx, cy, rx, total_h, base)
 
 
 def paste_pawn(scene: Image.Image, pawn: Image.Image, rng: random.Random,

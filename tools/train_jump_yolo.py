@@ -14,7 +14,7 @@ def main() -> None:
     p.add_argument("--data", default="datasets/jump_yolo/dataset.yaml")
     p.add_argument("--model", default="yolo11n.pt")
     p.add_argument("--epochs", type=int, default=80)
-    p.add_argument("--imgsz", type=int, default=960)
+    p.add_argument("--imgsz", type=int, default=512)
     p.add_argument("--batch", type=int, default=16)
     p.add_argument("--device", default="cpu")
     p.add_argument("--project", default="runs")
