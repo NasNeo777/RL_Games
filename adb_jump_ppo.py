@@ -85,6 +85,7 @@ class YoloJumpDetector:
 
     def detect(self, arr: np.ndarray) -> tuple[Piece | None, Target | None]:
         results = self.model.predict(source=arr, conf=self.conf, device=self.device, verbose=False)
+
         if not results:
             return None, None
         boxes = getattr(results[0], "boxes", None)
@@ -653,8 +654,8 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--serial", help="adb serial; default uses the only attached device")
     p.add_argument("--ckpt", default="runs/jump_ppo/best.pt")
-    p.add_argument("--detector", choices=["auto", "heuristic", "yolo"], default="auto")
-    p.add_argument("--yolo-model", default="runs/jump_yolo/weights/best.pt")
+    p.add_argument("--detector", choices=["auto", "heuristic", "yolo"], default="yolo")
+    p.add_argument("--yolo-model", default="runs/detect/runs/jump_yolo_manual/weights/best.pt")
     p.add_argument("--yolo-conf", type=float, default=0.25)
     p.add_argument("--yolo-device", default="cpu")
     p.add_argument("--coef", type=float, default=1.36, help="ms per pixel baseline")
