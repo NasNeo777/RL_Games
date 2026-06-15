@@ -227,6 +227,79 @@ def grow_region(
     return pts
 
 
+def landing_band_from_region(
+    region: np.ndarray,
+    seed_x: int,
+) -> tuple[float, float, float, tuple[int, int, int, int]] | None:
+    if len(region) < 50:
+        return None
+
+    y0 = int(region[:, 0].min())
+    y1 = int(region[:, 0].max())
+    height = y1 - y0 + 1
+    if height < 10:
+        return None
+
+    max_search_y = y0 + int(height * 0.58)
+    spans: list[tuple[int, int, int, float, int]] = []
+    max_width = 0
+    for y in range(y0, max_search_y + 1):
+        row_xs = np.sort(region[region[:, 0] == y, 1])
+        if len(row_xs) < 8:
+            continue
+        runs: list[tuple[int, int]] = []
+        start = int(row_xs[0])
+        prev = int(row_xs[0])
+        for x in row_xs[1:].tolist() + [None]:
+            if x is None or x != prev + 1:
+                if prev - start + 1 >= 8:
+                    runs.append((start, prev))
+                if x is not None:
+                    start = int(x)
+            prev = int(x) if x is not None else prev
+        if not runs:
+            continue
+        sx, ex = min(runs, key=lambda r: abs((r[0] + r[1]) / 2 - seed_x))
+        width = ex - sx + 1
+        max_width = max(max_width, width)
+        spans.append((y, sx, ex, (sx + ex) / 2.0, width))
+
+    if len(spans) < 5 or max_width < 20:
+        return None
+
+    best = None
+    window = 5
+    for i in range(len(spans) - window + 1):
+        chunk = spans[i:i + window]
+        ys = [row[0] for row in chunk]
+        if any(ys[j + 1] - ys[j] > 1 for j in range(window - 1)):
+            continue
+        widths = np.array([row[4] for row in chunk], dtype=np.float32)
+        centers = np.array([row[3] for row in chunk], dtype=np.float32)
+        mean_width = float(widths.mean())
+        if mean_width < max_width * 0.52:
+            continue
+        std_width = float(widths.std())
+        std_center = float(centers.std())
+        mean_y = float(np.mean(ys))
+        # Prefer wide, flat horizontal bands slightly below the very first visible tip.
+        score = mean_width - 2.2 * std_width - 1.8 * std_center + 0.08 * (mean_y - y0)
+        if best is None or score > best[0]:
+            best = (score, chunk)
+
+    if best is None:
+        return None
+
+    chunk = best[1]
+    sx = int(min(row[1] for row in chunk))
+    ex = int(max(row[2] for row in chunk))
+    cy = float(np.mean([row[0] for row in chunk]))
+    cx = float(np.mean([row[3] for row in chunk]))
+    half_width = (ex - sx) / 2.0
+    bbox = (sx, int(min(row[0] for row in chunk)), ex, int(max(row[0] for row in chunk)))
+    return cx, cy, half_width, bbox
+
+
 def find_target(arr: np.ndarray, piece: Piece) -> Target | None:
     h, w, _ = arr.shape
     arrf = arr.astype(np.float32)
@@ -277,9 +350,11 @@ def find_target(arr: np.ndarray, piece: Piece) -> Target | None:
     if len(band_xs) == 0:
         return None
     seed_x = int(np.median(band_xs)) + rx0
-    candidates = [(min_y + dy, seed_x) for dy in range(0, 16)]
+    candidates = [(min_y + dy, seed_x) for dy in range(0, min(72, roi.shape[0] - min_y), 4)]
     best_seed = None
     best_score = -1.0
+    best_region = None
+    best_landing = None
     for rel_y, sx_abs in candidates:
         y_abs = ry0 + rel_y
         if y_abs >= h:
@@ -287,22 +362,38 @@ def find_target(arr: np.ndarray, piece: Piece) -> Target | None:
         x_abs = max(rx0, min(rx1 - 1, sx_abs))
         px = arr[y_abs, x_abs].astype(np.int16)
         score = float(np.linalg.norm(px - bg_rows[y_abs]))
-        if score > best_score:
-            best_score = score
+        if score < 10:
+            continue
+        region = grow_region(arr, x_abs, y_abs, rx0, ry0, rx1, ry1)
+        if len(region) < 40:
+            continue
+        landing = landing_band_from_region(region, x_abs)
+        if landing is not None:
+            _, ly, half_width, _ = landing
+            candidate_score = half_width * 2.0 + 0.18 * (ly - ry0) + 0.05 * score
+        else:
+            candidate_score = len(region) * 0.01 + 0.05 * score
+        if candidate_score > best_score:
+            best_score = candidate_score
             best_seed = (x_abs, y_abs)
-    if best_seed is None:
+            best_region = region
+            best_landing = landing
+    if best_seed is None or best_region is None:
         return None
 
-    region = grow_region(arr, best_seed[0], best_seed[1], rx0, ry0, rx1, ry1)
-    if len(region) < 50:
-        return None
-    x0 = int(region[:, 1].min())
-    x1 = int(region[:, 1].max())
-    y0 = int(region[:, 0].min())
-    y1 = int(region[:, 0].max())
-    x = float(region[:, 1].mean())
-    y = float(region[:, 0].mean())
-    half_width_px = (x1 - x0) / 2.0
+    region = best_region
+    landing = best_landing
+    if landing is not None:
+        x, y, half_width_px, bbox = landing
+        x0, y0, x1, y1 = bbox
+    else:
+        x0 = int(region[:, 1].min())
+        x1 = int(region[:, 1].max())
+        y0 = int(region[:, 0].min())
+        y1 = int(region[:, 0].max())
+        x = float(region[:, 1].mean())
+        y = float(region[:, 0].mean())
+        half_width_px = (x1 - x0) / 2.0
     return Target(
         x=x,
         y=y,
