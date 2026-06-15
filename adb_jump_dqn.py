@@ -209,9 +209,10 @@ class RealJumpEnv:
         arr, piece, target = self._detect()
         # 摔死判定:棋子检测不到,或屏幕分数归零(比上一次小)
         cur_score = self._read_score(arr, default=None) if arr is not None else None
-        died = piece is None or (cur_score is not None and cur_score < self.prev_score)
+        died = piece is None or (cur_score is not None and cur_score <= self.prev_score)
 
         if died:
+            print("死了")
             return np.zeros(self.obs_dim, np.float32), -self.death_penalty, True, False, {"died": True}
 
         # 存活:奖励 = 屏幕分数增量;读不到分数则记 +1(存活计数)
