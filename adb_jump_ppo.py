@@ -464,15 +464,61 @@ def stable_detect(
     return last_img, last_arr, last_piece, last_target, valid
 
 
+def wait_until_ready(
+    serial: str | None,
+    min_air_time: float,
+    poll_delay: float,
+    ready_streak: int,
+    timeout: float,
+) -> bool:
+    time.sleep(min_air_time)
+    deadline = time.time() + timeout
+    prev_piece = None
+    prev_target = None
+    streak = 0
+    while time.time() < deadline:
+        _, _, piece, target = capture_and_detect(serial)
+        if piece is None or target is None:
+            prev_piece = None
+            prev_target = None
+            streak = 0
+            time.sleep(poll_delay)
+            continue
+
+        if prev_piece is None or prev_target is None:
+            prev_piece = piece
+            prev_target = target
+            streak = 1
+            time.sleep(poll_delay)
+            continue
+
+        stable_piece = abs(piece.x - prev_piece.x) <= 10 and abs(piece.y - prev_piece.y) <= 12
+        stable_target = abs(target.x - prev_target.x) <= 12 and abs(target.y - prev_target.y) <= 12
+        if stable_piece and stable_target:
+            streak += 1
+            if streak >= ready_streak:
+                return True
+        else:
+            streak = 1
+        prev_piece = piece
+        prev_target = target
+        time.sleep(poll_delay)
+    return False
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--serial", help="adb serial; default uses the only attached device")
     p.add_argument("--ckpt", default="runs/jump_dqn/best.pt")
     p.add_argument("--coef", type=float, default=1.36, help="ms per pixel baseline")
-    p.add_argument("--interval", type=float, default=2.05, help="seconds to wait after each jump")
+    p.add_argument("--interval", type=float, default=0.2, help="fallback extra wait after an abnormal transition")
     p.add_argument("--max-jumps", type=int, default=0, help="0 means unlimited")
     p.add_argument("--captures", type=int, default=3, help="screenshots to fuse with Kalman before each jump")
     p.add_argument("--sample-delay", type=float, default=0.06, help="seconds between fused screenshots")
+    p.add_argument("--min-air-time", type=float, default=0.34, help="minimum seconds to wait before checking whether the piece has landed")
+    p.add_argument("--poll-delay", type=float, default=0.05, help="seconds between ready checks after a jump")
+    p.add_argument("--ready-streak", type=int, default=1, help="consecutive stable detections required before the next jump")
+    p.add_argument("--ready-timeout", type=float, default=1.0, help="seconds to wait for the next stable ready state")
     p.add_argument("--no-adapt", action="store_true", help="disable online coefficient calibration")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--debug-dir", default="debug_jump_ppo")
@@ -489,6 +535,7 @@ def main() -> None:
     jumps = 0
     idle_retries = 0
     prev_jump: JumpRecord | None = None
+    last_jump_time: float | None = None
     while args.max_jumps <= 0 or jumps < args.max_jumps:
         img, arr, piece, target, valid_obs = stable_detect(
             args.serial,
@@ -497,6 +544,9 @@ def main() -> None:
         )
         h, w, _ = arr.shape
         if piece is None:
+            if last_jump_time is not None and time.time() - last_jump_time < args.ready_timeout:
+                time.sleep(args.poll_delay)
+                continue
             idle_retries += 1
             print(f"[{jumps}] piece not found, tap to (re)start")
             save_debug_image(img, debug_dir / f"{jumps:04d}_no_piece.png", None, None, "piece not found")
@@ -510,8 +560,13 @@ def main() -> None:
             if calib_msg:
                 print(calib_msg)
             prev_jump = None
+        if target is not None:
+            last_jump_time = None
 
         if target is None:
+            if last_jump_time is not None and time.time() - last_jump_time < args.ready_timeout:
+                time.sleep(args.poll_delay)
+                continue
             print(f"[{jumps}] target not found, waiting")
             save_debug_image(
                 img,
@@ -549,7 +604,8 @@ def main() -> None:
         long_press(args.serial, w // 2, int(h * 0.75), press_ms)
         prev_jump = JumpRecord(piece=piece, target=target, gap_px=gap_px, press_ms=press_ms)
         jumps += 1
-        time.sleep(args.interval)
+        last_jump_time = time.time()
+        time.sleep(args.min_air_time)
 
 
 if __name__ == "__main__":
