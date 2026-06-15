@@ -44,10 +44,16 @@ class SB3PPOAgent(BaseAgent):
                     n_epochs=10, gamma=0.95, gae_lambda=0.95, clip_range=0.1,
                     ent_coef=0.1, vf_coef=0.5, max_grad_norm=0.8,
                     target_kl=0.03)
+    # jump_* 图像环境是短回合、低维决策,比马里奥更需要频繁更新和更低探索噪声。
+    HP_IMAGE_JUMP = dict(learning_rate=3e-4, n_steps=256, batch_size=512,
+                         n_epochs=8, gamma=0.995, gae_lambda=0.95, clip_range=0.2,
+                         ent_coef=0.01, vf_coef=0.5, max_grad_norm=0.5,
+                         target_kl=0.05)
     # 熵系数从 HP_IMAGE["ent_coef"] 线性衰减到 end(按累计环境步数),
     # 前期多探索,后期降噪声帮收敛;end 不要太低,否则后期会
     # 探索不出关卡后段的难点(如 1-1 的悬崖跳)
     ENT_DECAY = dict(end=0.02, steps=2_000_000)
+    ENT_DECAY_JUMP = dict(end=0.001, steps=300_000)
     N_ENVS_IMAGE = 8            # 图像环境默认并行数(--n-envs 可覆盖)
 
     def __init__(self, obs_dim, n_actions, device="cpu", seed=None):
@@ -81,6 +87,11 @@ class SB3PPOAgent(BaseAgent):
         image_obs = env.obs_shape is not None
         n_envs = getattr(args, "n_envs", 0) \
             or (self.N_ENVS_IMAGE if image_obs else 1)
+        image_hp = dict(self.HP_IMAGE)
+        ent_decay = dict(self.ENT_DECAY)
+        if args.env in {"jump_pixels", "jump_screen"}:
+            image_hp = dict(self.HP_IMAGE_JUMP)
+            ent_decay = dict(self.ENT_DECAY_JUMP)
         if n_envs > 1:
             # 多环境并行采样。重型环境(如 mario,单步慢)用子进程真并行;
             # 轻量环境(env.parallel_mode == "dummy",如 jump_pixels)单步极快,
@@ -113,7 +124,7 @@ class SB3PPOAgent(BaseAgent):
             # CnnPolicy 的特征提取器(NatureCNN)后面不再需要额外 MLP 层
             policy = "CnnPolicy" if image_obs else "MlpPolicy"
             policy_kwargs = {} if image_obs else dict(self.POLICY_KWARGS)
-            hp = self.HP_IMAGE if image_obs else self.HP
+            hp = image_hp if image_obs else self.HP
             self.model = PPO(policy, venv, device=self.device,
                              seed=self.seed, verbose=0,
                              policy_kwargs=policy_kwargs,
@@ -128,11 +139,11 @@ class SB3PPOAgent(BaseAgent):
             """熵系数线性衰减(按累计环境步数,续练时接着衰减)。"""
 
             def _on_step(self):
-                start = agent.HP_IMAGE["ent_coef"]
+                start = image_hp["ent_coef"]
                 frac = min(1.0, (env_steps0 + self.num_timesteps)
-                           / agent.ENT_DECAY["steps"])
+                           / ent_decay["steps"])
                 self.model.ent_coef = \
-                    start + frac * (agent.ENT_DECAY["end"] - start)
+                    start + frac * (ent_decay["end"] - start)
                 return True
 
         class EvalCallback(BaseCallback):

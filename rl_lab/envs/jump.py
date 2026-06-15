@@ -35,7 +35,7 @@ D_MIN, D_MAX = 0.6, 3.4
 N_LEVELS = 41                 # 力度档数 → 分辨率 (D_MAX-D_MIN)/40 ≈ 0.07
 N_STYLES = 6                  # 底座样式数(仅供前端画图,需与 web 渲染器一致)
 
-SUCCESS_SCORE = 25            # 连续踩中这么多块台子算通关
+SUCCESS_SCORE = 100           # 连续踩中这么多块台子算通关
 MISS_PENALTY = -5.0
 PERFECT_FRAC = 0.2           # 落点误差 < 半宽的这个比例算"正中靶心"
 
@@ -47,6 +47,10 @@ class JumpEnv(BaseEnv):
     obs_dim = 2
     n_actions = N_LEVELS
     max_steps = 100
+    d_min = D_MIN
+    d_max = D_MAX
+    success_score = SUCCESS_SCORE
+    miss_penalty = MISS_PENALTY
 
     def __init__(self, seed=None):
         super().__init__()
@@ -80,7 +84,7 @@ class JumpEnv(BaseEnv):
 
     def step(self, action):
         action = int(action)
-        dist = D_MIN + action / (N_LEVELS - 1) * (D_MAX - D_MIN)
+        dist = self.d_min + action / (self.n_actions - 1) * (self.d_max - self.d_min)
         gap = self._gap()
         err = abs(dist - gap)
         half = self.next_half
@@ -108,11 +112,11 @@ class JumpEnv(BaseEnv):
             self.cur_half = self.next_half
             self.cur_style = self.next_style
             self._spawn_next()
-            if self.score >= SUCCESS_SCORE:
+            if self.score >= self.success_score:
                 success = True
                 reward += 50.0
         else:
-            reward = MISS_PENALTY
+            reward = self._miss_reward(err, half)
 
         terminated = success or not landed
         truncated = (not terminated) and self.t >= self.max_steps
@@ -132,6 +136,14 @@ class JumpEnv(BaseEnv):
         obs = self._obs()
         self._last_obs = obs
         return obs, reward, terminated, truncated, info
+
+    def _miss_reward(self, err, half):
+        # 图像输入前期最难的是“知道自己差了多少”。近失误不要和离谱失误
+        # 一样都记成 -5,否则策略很难把力度往正确方向推回来。
+        miss = max(0.0, err - half)
+        window = max(0.45, 0.22 * (self.d_max - self.d_min))
+        closeness = max(0.0, 1.0 - miss / window)
+        return self.miss_penalty + 4.0 * closeness
 
     def _gap(self):
         return abs(self.next_a - self.a) + abs(self.next_b - self.b)
@@ -177,8 +189,8 @@ class JumpEnv(BaseEnv):
     def render_spec(self):
         return {
             "type": "jump",
-            "goal": SUCCESS_SCORE,
-            "d_min": D_MIN, "d_max": D_MAX,
+            "goal": self.success_score,
+            "d_min": self.d_min, "d_max": self.d_max,
             "frame_dt": 0.6,
         }
 
@@ -189,10 +201,10 @@ SCREEN_W = 216
 SCREEN_H = 384
 # 真实手机截图里的有效决策区:去掉顶部 UI 和底部手指按压区,再缩到 84×84。
 OBS_CROP = {
-    "left": 0.08,
-    "top": 0.18,
-    "right": 0.92,
-    "bottom": 0.84,
+    "left": 0.00,
+    "top": 0.42,
+    "right": 1.00,
+    "bottom": 0.88,
 }
 
 
@@ -241,7 +253,7 @@ class JumpPixelsEnv(JumpEnv):
     ``--algo ppo``(SB3 会自动切 CnnPolicy)。
     """
     obs_shape = (1, PIX, PIX)        # 单通道图像,SB3 走 CnnPolicy
-    n_actions = N_LEVELS
+    n_actions = 25
     parallel_mode = "dummy"          # 单步极轻,同进程并行比子进程快一个数量级
 
     def __init__(self, seed=None):
@@ -258,31 +270,31 @@ class JumpPixelsEnv(JumpEnv):
     def _sample_style(self):
         self._style = {
             # Fixed-size grayscale input, but with screenshot-like camera jitter.
-            "bg_top": float(self.rng.uniform(138, 188)),
-            "bg_bottom": float(self.rng.uniform(156, 210)),
-            "vignette": float(self.rng.uniform(0.02, 0.14)),
-            "cam_zoom": float(self.rng.uniform(0.92, 1.08)),
-            "cam_shift_x": float(self.rng.uniform(-0.18, 0.18)),
-            "cam_shift_y": float(self.rng.uniform(-0.05, 0.06)),
-            "anchor_x": float(self.rng.uniform(0.34, 0.62)),
-            "ground": float(self.rng.uniform(0.58, 0.67)),
-            "body_depth": int(self.rng.integers(int(PIX * 0.12), int(PIX * 0.20))),
-            "body_drop": int(self.rng.integers(int(PIX * 0.08), int(PIX * 0.14))),
-            "piece_h": int(self.rng.integers(int(PIX * 0.18), int(PIX * 0.24))),
-            "piece_w": int(self.rng.integers(10, 14)),
-            "piece_tone": float(self.rng.uniform(45, 92)),
-            "piece_head": float(self.rng.uniform(72, 128)),
+            "bg_top": float(self.rng.uniform(150, 176)),
+            "bg_bottom": float(self.rng.uniform(170, 196)),
+            "vignette": float(self.rng.uniform(0.01, 0.05)),
+            "cam_zoom": float(self.rng.uniform(0.98, 1.04)),
+            "cam_shift_x": float(self.rng.uniform(-0.08, 0.08)),
+            "cam_shift_y": float(self.rng.uniform(-0.03, 0.03)),
+            "anchor_x": float(self.rng.uniform(0.40, 0.50)),
+            "ground": float(self.rng.uniform(0.60, 0.64)),
+            "body_depth": int(self.rng.integers(int(PIX * 0.14), int(PIX * 0.18))),
+            "body_drop": int(self.rng.integers(int(PIX * 0.09), int(PIX * 0.12))),
+            "piece_h": int(self.rng.integers(int(PIX * 0.20), int(PIX * 0.23))),
+            "piece_w": int(self.rng.integers(11, 13)),
+            "piece_tone": float(self.rng.uniform(48, 76)),
+            "piece_head": float(self.rng.uniform(88, 118)),
             "piece_variant": int(self.rng.integers(0, 4)),
-            "piece_lean": float(self.rng.uniform(-0.10, 0.10)),
-            "piece_head_scale": float(self.rng.uniform(0.74, 1.05)),
-            "piece_waist": float(self.rng.uniform(0.28, 0.55)),
-            "piece_shoulder": float(self.rng.uniform(0.52, 0.86)),
-            "piece_gloss": float(self.rng.uniform(6, 18)),
-            "piece_accent": float(self.rng.uniform(-10, 16)),
-            "contrast": float(self.rng.uniform(0.90, 1.18)),
-            "brightness": float(self.rng.uniform(-10, 10)),
-            "noise_sigma": float(self.rng.uniform(1.5, 7.0)),
-            "shadow_alpha": float(self.rng.uniform(0.08, 0.24)),
+            "piece_lean": float(self.rng.uniform(-0.04, 0.04)),
+            "piece_head_scale": float(self.rng.uniform(0.88, 1.00)),
+            "piece_waist": float(self.rng.uniform(0.34, 0.48)),
+            "piece_shoulder": float(self.rng.uniform(0.62, 0.78)),
+            "piece_gloss": float(self.rng.uniform(8, 14)),
+            "piece_accent": float(self.rng.uniform(-4, 10)),
+            "contrast": float(self.rng.uniform(1.00, 1.08)),
+            "brightness": float(self.rng.uniform(-4, 4)),
+            "noise_sigma": float(self.rng.uniform(0.0, 1.8)),
+            "shadow_alpha": float(self.rng.uniform(0.10, 0.18)),
         }
 
     def _platform_style(self, side):
@@ -421,15 +433,6 @@ class JumpPixelsEnv(JumpEnv):
         if self._style["noise_sigma"] > 0:
             img += self.rng.normal(0.0, self._style["noise_sigma"], size=img.shape)
 
-        # Mild streak / UI clutter lines to reduce overfitting to clean renders.
-        if self.rng.random() < 0.35:
-            band_y = int(self.rng.integers(0, PIX))
-            band_h = int(self.rng.integers(1, 3))
-            img[max(0, band_y - band_h):min(PIX, band_y + band_h + 1)] += self.rng.uniform(-12, 12)
-        if self.rng.random() < 0.22:
-            x0 = int(self.rng.integers(0, PIX - 8))
-            img[: int(PIX * self.rng.uniform(0.12, 0.35)), x0:x0 + int(self.rng.integers(4, 12))] += self.rng.uniform(-10, 16)
-
         img = (img - 127.5) * self._style["contrast"] + 127.5 + self._style["brightness"]
         return np.clip(img, 0, 255).astype(np.uint8)
 
@@ -478,7 +481,7 @@ class JumpScreenEnv(JumpEnv):
     """
 
     obs_shape = (1, PIX, PIX)
-    n_actions = N_LEVELS
+    n_actions = 25
     parallel_mode = "dummy"
 
     def __init__(self, seed=None):
@@ -503,19 +506,19 @@ class JumpScreenEnv(JumpEnv):
             "sky_top": tuple(int(v) for v in sky_top),
             "sky_bottom": tuple(int(v) for v in sky_bottom),
             "ground_rgb": tuple(int(v) for v in ground),
-            "anchor_x": float(self.rng.uniform(0.34, 0.52)),
-            "anchor_y": float(self.rng.uniform(0.70, 0.78)),
-            "cam_zoom": float(self.rng.uniform(0.92, 1.08)),
-            "cam_shift_x": float(self.rng.uniform(-0.22, 0.22)),
-            "cam_shift_y": float(self.rng.uniform(-0.14, 0.08)),
-            "contrast": float(self.rng.uniform(0.92, 1.16)),
-            "brightness": float(self.rng.uniform(-8, 10)),
-            "noise_sigma": float(self.rng.uniform(1.0, 5.8)),
-            "vignette": float(self.rng.uniform(0.05, 0.15)),
-            "platform_base": int(self.rng.integers(76, 198)),
-            "piece_tone": int(self.rng.integers(44, 86)),
-            "piece_head": int(self.rng.integers(84, 138)),
-            "shadow_alpha": float(self.rng.uniform(0.12, 0.24)),
+            "anchor_x": float(self.rng.uniform(0.41, 0.47)),
+            "anchor_y": float(self.rng.uniform(0.73, 0.76)),
+            "cam_zoom": float(self.rng.uniform(1.06, 1.12)),
+            "cam_shift_x": float(self.rng.uniform(-0.06, 0.06)),
+            "cam_shift_y": float(self.rng.uniform(-0.03, 0.02)),
+            "contrast": float(self.rng.uniform(1.00, 1.06)),
+            "brightness": float(self.rng.uniform(-2, 4)),
+            "noise_sigma": float(self.rng.uniform(0.0, 1.1)),
+            "vignette": float(self.rng.uniform(0.01, 0.04)),
+            "platform_base": int(self.rng.integers(92, 176)),
+            "piece_tone": int(self.rng.integers(50, 78)),
+            "piece_head": int(self.rng.integers(96, 126)),
+            "shadow_alpha": float(self.rng.uniform(0.14, 0.20)),
         }
 
     def _mix(self, base: tuple[int, int, int], delta: int) -> tuple[int, int, int]:
@@ -637,22 +640,11 @@ class JumpScreenEnv(JumpEnv):
 
         cur = (self.a, self.b, self.cur_half)
         nxt = (self.next_a, self.next_b, self.next_half)
-        future_gap = float(self.rng.uniform(GAP_MIN, GAP_MAX))
-        fdx, fdy = DIRS[int(self.rng.integers(2))]
-        future = (
-            self.next_a + future_gap * fdx,
-            self.next_b + future_gap * fdy,
-            float(self.rng.uniform(HALF_MIN, HALF_MAX)),
-        )
-        future_style = int(self.rng.integers(N_STYLES))
-
-        future_depth = future[0] + future[1]
         next_depth = nxt[0] + nxt[1]
         cur_depth = cur[0] + cur[1]
         cur_geom = None
         for center, style_idx, _depth in sorted(
             [
-                (future, future_style, future_depth),
                 (nxt, self.next_style, next_depth),
                 (cur, self.cur_style, cur_depth),
             ],
@@ -665,22 +657,6 @@ class JumpScreenEnv(JumpEnv):
 
         cur_x, cur_y, cur_rx, cur_ry = cur_geom
         self._draw_piece(draw, cur_x, cur_y, cur_rx, cur_ry)
-
-        if self.rng.random() < 0.8:
-            score_w = int(SCREEN_W * self.rng.uniform(0.18, 0.26))
-            score_h = int(SCREEN_H * self.rng.uniform(0.038, 0.055))
-            score_x = (SCREEN_W - score_w) // 2 + int(self.rng.integers(-8, 9))
-            score_y = int(SCREEN_H * self.rng.uniform(0.05, 0.11))
-            draw.rounded_rectangle(
-                (score_x, score_y, score_x + score_w, score_y + score_h),
-                radius=max(6, score_h // 2),
-                fill=(255, 255, 255, int(self.rng.integers(70, 118))),
-            )
-        if self.rng.random() < 0.45:
-            btn_r = int(SCREEN_W * self.rng.uniform(0.030, 0.042))
-            bx = int(SCREEN_W * self.rng.uniform(0.10, 0.18))
-            by = int(SCREEN_H * self.rng.uniform(0.07, 0.12))
-            draw.ellipse((bx - btn_r, by - btn_r, bx + btn_r, by + btn_r), fill=(255, 255, 255, 82))
 
         arr = np.asarray(img.convert("RGB"), dtype=np.float32)
         yy, xx = np.mgrid[0:SCREEN_H, 0:SCREEN_W]
