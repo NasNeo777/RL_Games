@@ -187,23 +187,212 @@ class JumpPixelsEnv(JumpEnv):
     def __init__(self, seed=None):
         super().__init__(seed=seed)
         self.obs_dim = int(np.prod(self.obs_shape))
+        self._yy, self._xx = np.mgrid[0:PIX, 0:PIX]
+        self._style = {}
+        self._sample_style()
+
+    def reset(self, seed=None):
+        self._sample_style()
+        return super().reset(seed=seed)
+
+    def _sample_style(self):
+        self._style = {
+            # Fixed-size grayscale input, but with screenshot-like camera jitter.
+            "bg_top": float(self.rng.uniform(138, 188)),
+            "bg_bottom": float(self.rng.uniform(156, 210)),
+            "vignette": float(self.rng.uniform(0.02, 0.14)),
+            "cam_zoom": float(self.rng.uniform(0.92, 1.08)),
+            "cam_shift_x": float(self.rng.uniform(-0.18, 0.18)),
+            "cam_shift_y": float(self.rng.uniform(-0.05, 0.06)),
+            "anchor_x": float(self.rng.uniform(0.34, 0.62)),
+            "ground": float(self.rng.uniform(0.58, 0.67)),
+            "body_depth": int(self.rng.integers(int(PIX * 0.12), int(PIX * 0.20))),
+            "body_drop": int(self.rng.integers(int(PIX * 0.08), int(PIX * 0.14))),
+            "piece_h": int(self.rng.integers(int(PIX * 0.18), int(PIX * 0.24))),
+            "piece_w": int(self.rng.integers(10, 14)),
+            "piece_tone": float(self.rng.uniform(45, 92)),
+            "piece_head": float(self.rng.uniform(72, 128)),
+            "piece_variant": int(self.rng.integers(0, 4)),
+            "piece_lean": float(self.rng.uniform(-0.10, 0.10)),
+            "piece_head_scale": float(self.rng.uniform(0.74, 1.05)),
+            "piece_waist": float(self.rng.uniform(0.28, 0.55)),
+            "piece_shoulder": float(self.rng.uniform(0.52, 0.86)),
+            "piece_gloss": float(self.rng.uniform(6, 18)),
+            "piece_accent": float(self.rng.uniform(-10, 16)),
+            "contrast": float(self.rng.uniform(0.90, 1.18)),
+            "brightness": float(self.rng.uniform(-10, 10)),
+            "noise_sigma": float(self.rng.uniform(1.5, 7.0)),
+            "shadow_alpha": float(self.rng.uniform(0.08, 0.24)),
+        }
+
+    def _platform_style(self, side):
+        base = float(self.rng.uniform(55, 205))
+        top = float(np.clip(base + self.rng.uniform(18, 62), 38, 245))
+        body = float(np.clip(base - self.rng.uniform(10, 42), 18, 220))
+        shape = int((self.cur_style if side == "cur" else self.next_style) % 4)
+        deco = int(self.rng.integers(0, 4))
+        return {
+            "shape": shape,
+            "top": top,
+            "body": body,
+            "edge": float(np.clip(top - self.rng.uniform(10, 32), 40, 235)),
+            "deco": deco,
+        }
+
+    def _world_to_px(self, x):
+        span = D_MAX + HALF_MAX + 0.95
+        ppu = self._style["cam_zoom"] * PIX / (2 * span)
+        anchor = self._style["anchor_x"] * PIX
+        return anchor + (x + self._style["cam_shift_x"]) * ppu
+
+    def _top_mask(self, cx, cy, hw, hh, shape):
+        xx, yy = self._xx, self._yy
+        if shape == 0:
+            return (np.abs(xx - cx) <= hw) & (np.abs(yy - cy) <= hh)
+        if shape == 1:
+            return ((xx - cx) / max(hw, 1)) ** 2 + ((yy - cy) / max(hh, 1)) ** 2 <= 1.0
+        if shape == 2:
+            # Rounded rectangle / pill.
+            core = (np.abs(xx - cx) <= hw * 0.76) & (np.abs(yy - cy) <= hh)
+            left = ((xx - (cx - hw * 0.76)) / max(hw * 0.34, 1)) ** 2 \
+                + ((yy - cy) / max(hh, 1)) ** 2 <= 1.0
+            right = ((xx - (cx + hw * 0.76)) / max(hw * 0.34, 1)) ** 2 \
+                + ((yy - cy) / max(hh, 1)) ** 2 <= 1.0
+            return core | left | right
+        # Slightly faceted diamond-ish top.
+        return (np.abs(xx - cx) / max(hw, 1) + np.abs(yy - cy) / max(hh, 1)) <= 1.0
+
+    def _render_platform(self, img, cx, cy, half_w, style, facing):
+        hw = max(7, int(round(half_w)))
+        hh = max(4, int(round(hw * self.rng.uniform(0.33, 0.52))))
+        depth = self._style["body_depth"]
+        drop = self._style["body_drop"]
+        top_mask = self._top_mask(cx, cy, hw, hh, style["shape"])
+
+        body_shift = int(np.sign(facing) * max(6, hw * 0.30))
+        body_mask = self._top_mask(cx + body_shift, cy + drop, hw, hh, style["shape"])
+        body_mask &= self._yy >= cy
+        shadow_mask = self._top_mask(cx - hw * 0.78, cy + drop, int(hw * 0.92), int(hh * 1.05), style["shape"])
+
+        img[shadow_mask] = np.minimum(img[shadow_mask], img[shadow_mask] * (1.0 - self._style["shadow_alpha"]))
+        img[body_mask] = style["body"]
+        img[top_mask] = style["top"]
+
+        edge_band = top_mask & (~self._top_mask(cx, cy + 1, max(hw - 1, 1), max(hh - 1, 1), style["shape"]))
+        img[edge_band] = style["edge"]
+
+        if style["deco"] == 0:
+            deco = self._top_mask(cx, cy, int(hw * 0.45), int(hh * 0.45), 1)
+            ring = deco & (~self._top_mask(cx, cy, int(hw * 0.18), int(hh * 0.18), 1))
+            img[ring] = np.clip(style["edge"] + 18, 0, 255)
+        elif style["deco"] == 1:
+            stripe = top_mask & (np.abs(self._yy - cy) <= max(1, int(hh * 0.16)))
+            img[stripe] = np.clip(style["edge"] + 10, 0, 255)
+        elif style["deco"] == 2:
+            dot = self._top_mask(cx, cy, max(1, int(hw * 0.16)), max(1, int(hh * 0.16)), 1)
+            img[dot] = np.clip(style["top"] + 18, 0, 255)
+
+    def _render_piece(self, img, cx, ground):
+        tone = self._style["piece_tone"]
+        head = self._style["piece_head"]
+        body_h = self._style["piece_h"]
+        body_w = self._style["piece_w"]
+        variant = self._style["piece_variant"]
+        base_y = ground - 3
+        top_y = base_y - body_h
+        xx, yy = self._xx, self._yy
+
+        shadow = (((xx - (cx - body_w * 1.2)) / max(body_w * 1.15, 1)) ** 2
+                  + ((yy - (base_y + body_w * 0.45)) / max(body_w * 0.52, 1)) ** 2) <= 1.0
+        img[shadow] = np.minimum(img[shadow], img[shadow] * (1.0 - self._style["shadow_alpha"] * 1.4))
+
+        t = np.clip((yy - top_y) / max(body_h, 1), 0, 1)
+        spine = cx + self._style["piece_lean"] * body_h * (1.0 - t)
+        if variant == 0:
+            radius = body_w * (self._style["piece_waist"] + self._style["piece_shoulder"] * t)
+        elif variant == 1:
+            radius = body_w * (0.42 + 0.22 * np.sin(np.pi * np.clip(t, 0, 1)) + 0.26 * t)
+        elif variant == 2:
+            radius = body_w * (0.60 - 0.18 * np.abs(t - 0.42) + 0.22 * t)
+        else:
+            radius = body_w * (0.36 + 0.70 * (t ** 1.45))
+        body = (yy >= top_y) & (yy <= base_y) & (np.abs(xx - spine) <= radius)
+        shade = tone + self._style["piece_gloss"] * (1.0 - t)
+        img[body] = shade[body]
+
+        if variant in (1, 3):
+            accent = body & (xx > spine + radius * 0.18)
+            img[accent] = np.clip(img[accent] + self._style["piece_accent"], 0, 255)
+        else:
+            accent = body & (xx < spine - radius * 0.18)
+            img[accent] = np.clip(img[accent] + self._style["piece_accent"] * 0.7, 0, 255)
+
+        neck_w = body_w * (0.48 if variant == 2 else 0.62)
+        neck_h = body_w * (0.48 if variant == 3 else 0.58)
+        neck = (((xx - (cx + self._style["piece_lean"] * body_h * 0.95)) / max(neck_w, 1)) ** 2
+                + ((yy - top_y) / max(neck_h, 1)) ** 2) <= 1.0
+        img[neck] = np.clip(tone + 14 + self._style["piece_gloss"] * 0.4, 0, 255)
+
+        head_scale = self._style["piece_head_scale"]
+        head_cy = top_y - body_w * (0.60 + 0.12 * variant)
+        head_rx = max(body_w * 0.60, body_w * 0.82 * head_scale)
+        head_ry = max(body_w * 0.60, body_w * (0.72 + 0.08 * (variant == 3)) * head_scale)
+        head_cx = cx + self._style["piece_lean"] * body_h * 0.92
+        head_mask = (((xx - head_cx) / max(head_rx, 1)) ** 2
+                     + ((yy - head_cy) / max(head_ry, 1)) ** 2) <= 1.0
+        img[head_mask] = head
+
+        if variant in (0, 2):
+            cap = (((xx - head_cx) / max(head_rx * 0.48, 1)) ** 2
+                   + ((yy - (head_cy - head_ry * 0.12)) / max(head_ry * 0.34, 1)) ** 2) <= 1.0
+            img[cap] = np.clip(head + self._style["piece_accent"] * 0.6, 0, 255)
+        else:
+            band = head_mask & (np.abs(yy - head_cy) <= max(1, int(head_ry * 0.14)))
+            img[band] = np.clip(head - 10 + self._style["piece_accent"] * 0.5, 0, 255)
+
+    def _apply_post(self, img):
+        # Grayscale stays grayscale; only style varies.
+        cx = PIX * self.rng.uniform(0.35, 0.65)
+        cy = PIX * self.rng.uniform(0.25, 0.55)
+        dist = ((self._xx - cx) / PIX) ** 2 + ((self._yy - cy) / PIX) ** 2
+        vignette = 1.0 - self._style["vignette"] * np.clip(dist * 3.4, 0, 1)
+        img *= vignette
+
+        if self._style["noise_sigma"] > 0:
+            img += self.rng.normal(0.0, self._style["noise_sigma"], size=img.shape)
+
+        # Mild streak / UI clutter lines to reduce overfitting to clean renders.
+        if self.rng.random() < 0.35:
+            band_y = int(self.rng.integers(0, PIX))
+            band_h = int(self.rng.integers(1, 3))
+            img[max(0, band_y - band_h):min(PIX, band_y + band_h + 1)] += self.rng.uniform(-12, 12)
+        if self.rng.random() < 0.22:
+            x0 = int(self.rng.integers(0, PIX - 8))
+            img[: int(PIX * self.rng.uniform(0.12, 0.35)), x0:x0 + int(self.rng.integers(4, 12))] += self.rng.uniform(-10, 16)
+
+        img = (img - 127.5) * self._style["contrast"] + 127.5 + self._style["brightness"]
+        return np.clip(img, 0, 255).astype(np.uint8)
 
     def _obs(self):
-        img = np.zeros((PIX, PIX), dtype=np.uint8)
+        img = np.linspace(self._style["bg_top"], self._style["bg_bottom"], PIX, dtype=np.float32)[:, None]
+        img = np.repeat(img, PIX, axis=1)
         gap = self._gap()
-        # 世界 x → 像素:展示 [-0.7, D_MAX+HALF_MAX+0.3] 这段
-        xmin, xmax = -0.7, D_MAX + HALF_MAX + 0.3
-        ppu = PIX / (xmax - xmin)
-        px = lambda x: int(round((x - xmin) * ppu))
-        clip = lambda v: max(0, min(PIX, v))
-        ground, thick = int(PIX * 0.60), int(PIX * 0.22)
-        # 当前台子(中等亮度)
-        img[ground:ground + thick, clip(px(-self.cur_half)):clip(px(self.cur_half))] = 130
-        # 目标台子(最亮),位置=缺口,宽度=台宽
-        img[ground:ground + thick,
-            clip(px(gap - self.next_half)):clip(px(gap + self.next_half))] = 255
-        # 棋子(当前台子正上方的小方块)
-        cx = px(0.0)
-        img[ground - int(PIX * 0.19):ground - 2, clip(cx - 3):clip(cx + 3)] = 255
-        return img[None, :, :]
+        signed_gap = gap if self.next_dir == 0 else -gap
+        ground = int(PIX * self._style["ground"] + self._style["cam_shift_y"] * PIX)
 
+        cur_hw = self.cur_half * (PIX / (D_MAX + HALF_MAX + 1.4)) * 6.2
+        nxt_hw = self.next_half * (PIX / (D_MAX + HALF_MAX + 1.4)) * 6.2
+        cur_x = self._world_to_px(0.0)
+        nxt_x = self._world_to_px(signed_gap)
+
+        cur_style = self._platform_style("cur")
+        nxt_style = self._platform_style("next")
+        facing = 1 if signed_gap >= 0 else -1
+        self._render_platform(img, cur_x, ground, cur_hw, cur_style, facing=-facing)
+        self._render_platform(img, nxt_x, ground, nxt_hw, nxt_style, facing=facing)
+        self._render_piece(img, cur_x, ground)
+        if self.rng.random() < 0.25:
+            # Extra horizontal mirror augmentation reduces bias to a single jump side.
+            img = img[:, ::-1].copy()
+        img = self._apply_post(img)
+        return img[None, :, :]

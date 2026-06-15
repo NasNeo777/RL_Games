@@ -318,6 +318,7 @@ def find_target(arr: np.ndarray, piece: Piece) -> Target | None:
     mask[ey0:ey1, ex0:ex1] = False
 
     run_seed: tuple[int, int, int] | None = None
+    run_seed_score = float("-inf")
     for y in range(int(h * 0.30), int(h * 0.62)):
         runs = row_runs(mask[y], min_len=14, max_len=int(w * 0.32))
         runs = [
@@ -325,10 +326,13 @@ def find_target(arr: np.ndarray, piece: Piece) -> Target | None:
             for sx, ex in runs
             if sx > 10 and ex < w - 10 and abs((sx + ex) / 2 - piece.x) > 75
         ]
-        if runs:
-            sx, ex = runs[0]
-            run_seed = (y, sx, ex)
-            break
+        for sx, ex in runs:
+            cx = (sx + ex) / 2.0
+            width = ex - sx + 1
+            score = width * 1.7 + y * 0.22 - abs(cx - piece.x) * 0.12
+            if score > run_seed_score:
+                run_seed_score = score
+                run_seed = (y, sx, ex)
     if run_seed is None:
         return None
 
