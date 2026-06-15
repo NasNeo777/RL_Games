@@ -483,11 +483,13 @@ const RENDERERS = {
     const p0 = f.p0, p1 = f.p1, land = f.land;   // [a, b, half]
     const dist = Math.abs(land[0] - p0[0]) + Math.abs(land[1] - p0[1]);
     const standing = dist < 1e-6;
+    const dir = (land[0] - p0[0]) > 1e-6 ? 1 : -1;   // 本次跳跃方向:右前 / 左前
     const powerN = Math.max(0, Math.min(1,
       (dist - spec.d_min) / (spec.d_max - spec.d_min)));
 
     // 等距投影 (a,b)→屏幕,锚点固定在偏左下;镜头中心 (ca,cb) 锁当前台,落定后平移到目标台
-    const STEP_X = W * 0.15, STEP_Y = W * 0.075, SCALE = W * 0.13;
+    // STEP_Y/STEP_X = 0.556 对齐参考实现的 arrayRatio(每跳纵向位移 = 距离 × 该比值)
+    const STEP_X = W * 0.15, STEP_Y = W * 0.15 * 0.556, SCALE = W * 0.13;
     const anchorX = W * 0.42, anchorY = H * 0.70;
     let ca = p0[0], cb = p0[1];
     if (!standing && f.ok && frac > JUMP_END) {
@@ -574,25 +576,28 @@ const RENDERERS = {
     }
 
     // 棋子位置 + 形变:蓄力 → 起跳(飞到实际落点)→ 落定(贴目标台心,镜头平移)
+    // rot=腾空时绕身子翻转一整圈(对齐参考实现的 rotateBy(0.5, dir*360))
     const apex = W * 0.10 + 0.32 * dist * STEP_X;
-    let pa = p0[0], pb = p0[1], lift = 0, sx = 1, sy = 1;
+    let pa = p0[0], pb = p0[1], lift = 0, sx = 1, sy = 1, rot = 0;
     if (standing) {                          // 开局静止帧:站在起跳台
       // 取默认值
     } else if (frac < CHARGE_END) {          // ① 蓄力:下压,力度越大压越狠
       const ct = frac / CHARGE_END;
       sy = 1 - 0.34 * powerN * ct; sx = 1 + 0.20 * powerN * ct;
-    } else if (f.ok && frac < JUMP_END) {    // ② 起跳:抛物线飞向实际落点
+    } else if (f.ok && frac < JUMP_END) {    // ② 起跳:抛物线飞向实际落点,翻转一圈
       const jt = (frac - CHARGE_END) / (JUMP_END - CHARGE_END);
       pa = lerp(p0[0], land[0], jt); pb = lerp(p0[1], land[1], jt);
       lift = apex * Math.sin(Math.PI * jt);
+      rot = dir * 2 * Math.PI * jt;
     } else if (f.ok) {                        // ③ 落定:从落点稳到台心,镜头同步平移回锚点
       const pt = ease((frac - JUMP_END) / (1 - JUMP_END));
       pa = lerp(land[0], p1[0], pt); pb = lerp(land[1], p1[1], pt);
-    } else {                                  // 失败:冲出去栽进缝里
+    } else {                                  // 失败:冲出去栽进缝里(边翻边掉)
       const jt = (frac - CHARGE_END) / (1 - CHARGE_END);
       pa = lerp(p0[0], land[0], jt); pb = lerp(p0[1], land[1], jt);
       lift = apex * Math.sin(Math.PI * jt)
            - (jt > 0.55 ? (jt - 0.55) / 0.45 * H * 0.6 : 0);
+      rot = dir * 2 * Math.PI * jt;
     }
     const [bx, footY] = proj(pa, pb);
     const by = footY - lift;
@@ -606,9 +611,14 @@ const RENDERERS = {
       ctx.fill();
     }
 
-    // 棋子本体:黑色,锥形身子 + 球头 + 高光(按 sx/sy 形变)
+    // 棋子本体:黑色,锥形身子 + 球头 + 高光(按 sx/sy 形变);腾空时绕身子中心翻转
     const ch = W * 0.135 * sy, headR = W * 0.135 * 0.19, bw = W * 0.135 * 0.3 * sx;
     const cyHead = by - ch + headR;
+    ctx.save();
+    if (rot) {                               // 绕身子中线翻转一整圈
+      const pivot = by - ch * 0.5;
+      ctx.translate(bx, pivot); ctx.rotate(rot); ctx.translate(-bx, -pivot);
+    }
     ctx.fillStyle = "#222129";
     ctx.beginPath();
     ctx.moveTo(bx - bw, by);
@@ -619,6 +629,7 @@ const RENDERERS = {
     ctx.beginPath(); ctx.arc(bx, cyHead, headR, 0, 7); ctx.fill();
     ctx.fillStyle = "rgba(255,255,255,.32)";
     ctx.beginPath(); ctx.arc(bx - headR * 0.3, cyHead - headR * 0.3, headR * 0.38, 0, 7); ctx.fill();
+    ctx.restore();
 
     // 蓄力力度条:蓄力阶段在棋子上方涨起,直观展示"按压时长 → 跳多远"
     if (!standing && frac < CHARGE_END) {
