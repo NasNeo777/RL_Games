@@ -155,20 +155,26 @@ NO_OPEN=1 ./start.sh
 .venv/bin/python -m rl_lab.server --port 8000
 ```
 
-### 跳一跳 YOLO 检测
+### 🤖 附加件:跳一跳真机部署(单个环境的额外能力)
+
+> 这是 **`jump` 这一个环境** 的真机落地附加件,**不是项目主体**。把训练好的
+> 跳一跳 agent 部署到真手机:截图 → YOLO 检测棋子/台子 → PPO 决定力度 → adb 长按。
+> 完整步骤、输入输出、排错见 **[docs/jump_yolo_pipeline.md](docs/jump_yolo_pipeline.md)**,
+> 工具索引见 **[tools/README.md](tools/README.md)**。
 
 ```bash
-# 先装 YOLO 依赖
 .venv/bin/pip install ultralytics
 
-# 从手机抓原始截图并导出 piece / landing 两类标签
-.venv/bin/python tools/capture_jump_yolo_dataset.py --serial <adb-serial> --count 120 --preview
+# ① 生成合成训练数据(推荐,标签完美;另有真图标注路线见文档)
+.venv/bin/python tools/gen_synthetic_jump.py --n 2000 --out datasets/jump_synth
 
-# 训练检测器
-.venv/bin/python tools/train_jump_yolo.py --device cpu
+# ② 训练 YOLO 检测器(Mac 用 mps,无 GPU 用 cpu)
+.venv/bin/python tools/train_jump_yolo.py --data datasets/jump_synth/dataset.yaml \
+    --device mps --name jump_yolo_synth --project runs/detect/runs
 
-# 真机推理优先走 YOLO,缺模型时会自动回退到规则检测
-.venv/bin/python adb_jump_ppo.py --serial <adb-serial> --detector auto
+# ③ 真机运行(--dry-run 只测检测不真按)
+.venv/bin/python adb_jump_ppo.py --serial <adb-serial> \
+    --yolo-model runs/detect/runs/jump_yolo_synth/weights/best.pt
 ```
 
 训练产物写进 `runs/<env>_<algo>/`:
@@ -301,14 +307,25 @@ class MyGameEnv(GymEnv):
 
 ## 📁 目录结构
 
+**主体——多环境 RL 实验室**(项目核心,环境/算法无关):
+
 ```
 rl_lab/
-  envs/        环境(注册表 + 8 款游戏)
-  algos/       算法(注册表 + DQN / PPO / td2048)
+  envs/        环境(注册表 + 8 款游戏)        ← 加游戏改这里
+  algos/       算法(注册表 + DQN / PPO / td2048)  ← 加算法改这里
   train.py     持续训练入口
   server.py    演示服务器(纯标准库,零依赖)
   web/         网页界面(单文件,零依赖)
 runs/          训练产物(检查点、曲线数据)
+start.sh       一键训练 + 演示
+```
+
+**附加件——跳一跳真机部署**(只服务 `jump` 一个环境,可忽略):
+
+```
+adb_jump_ppo.py            真机主程序(截图→检测→决策→长按)
+tools/                     YOLO 数据/训练工具集  → 见 tools/README.md
+docs/jump_yolo_pipeline.md 真机部署完整步骤文档
 ```
 
 <div align="center">

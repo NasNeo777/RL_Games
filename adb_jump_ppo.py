@@ -9,7 +9,7 @@ import math
 import subprocess
 import time
 from collections import deque
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -41,29 +41,6 @@ class Target:
     half_width_px: float
     bbox: tuple[int, int, int, int]
     seed: tuple[int, int]
-
-
-@dataclass
-class JumpRecord:
-    piece: Piece
-    target: Target
-    gap_px: float
-    press_ms: int
-
-
-@dataclass
-class Kalman1D:
-    x: float
-    p: float = 1.0
-    q: float = 1.5
-    r: float = 16.0
-
-    def update(self, z: float) -> float:
-        self.p += self.q
-        k = self.p / (self.p + self.r)
-        self.x += k * (z - self.x)
-        self.p = (1.0 - k) * self.p
-        return self.x
 
 
 YOLO_PIECE_NAMES = {"piece", "pawn", "player", "jumper"}
@@ -509,37 +486,6 @@ def action_to_distance(action: int) -> float:
     return D_MIN + action / 40.0 * (D_MAX - D_MIN)
 
 
-def update_coef_from_landing(coef: float, prev: JumpRecord, current_piece: Piece) -> tuple[float, str | None]:
-    start = np.array([prev.piece.x, prev.piece.y], dtype=np.float32)
-    target = np.array([prev.target.x, prev.target.y], dtype=np.float32)
-    actual = np.array([current_piece.x, current_piece.y], dtype=np.float32)
-    jump_vec = target - start
-    jump_len = float(np.linalg.norm(jump_vec))
-    if jump_len < 1e-6:
-        return coef, None
-
-    unit = jump_vec / jump_len
-    delta = actual - start
-    actual_proj = float(np.dot(delta, unit))
-    actual_proj = float(np.clip(actual_proj, jump_len * 0.6, jump_len * 1.4))
-    landing_err = float(np.linalg.norm(actual - target))
-    perp_err = float(np.linalg.norm(delta - unit * actual_proj))
-    # Only learn from landings that stayed on roughly the same jump ray.
-    if perp_err > max(85.0, prev.target.half_width_px * 1.4):
-        return coef, None
-    if actual_proj < jump_len * 0.78 or actual_proj > jump_len * 1.22:
-        return coef, None
-
-    ratio = jump_len / max(actual_proj, 1e-6)
-    ratio = float(np.clip(ratio, 0.94, 1.06))
-    new_coef = float(np.clip(coef * (ratio ** 0.35), 1.18, 1.56))
-    msg = (
-        f"calib landing_err={landing_err:.1f}px perp_err={perp_err:.1f}px actual_proj={actual_proj:.1f}px "
-        f"target_gap={jump_len:.1f}px coef {coef:.4f}->{new_coef:.4f}"
-    )
-    return new_coef, msg
-
-
 def long_press(serial: str | None, x: int, y: int, ms: int) -> None:
     adb_run(serial, "shell", "input", "swipe", str(x), str(y), str(x + 1), str(y + 1), str(ms))
 
@@ -577,56 +523,6 @@ def save_raw_image(
         return
     out_dir.mkdir(parents=True, exist_ok=True)
     img.save(out_dir / f"prejump_{frame_idx:05d}.png")
-
-
-def stable_detect(
-    serial: str | None,
-    captures: int,
-    sample_delay: float,
-    detector: YoloJumpDetector | None = None,
-) -> tuple[Image.Image, np.ndarray, Piece | None, Target | None, int]:
-    last_img = None
-    last_arr = None
-    last_piece = None
-    last_target = None
-    valid = 0
-    fx = fy = tx = ty = th = None
-
-    for i in range(max(1, captures)):
-        img, arr, piece, target = capture_and_detect(serial, detector=detector)
-        if piece is not None:
-            last_img, last_arr, last_piece = img, arr, piece
-        if piece is not None and target is not None:
-            last_img, last_arr, last_piece, last_target = img, arr, piece, target
-            if fx is None:
-                fx = Kalman1D(piece.x, p=4.0, q=1.2, r=9.0)
-                fy = Kalman1D(piece.y, p=4.0, q=1.2, r=9.0)
-                tx = Kalman1D(target.x, p=9.0, q=2.0, r=16.0)
-                ty = Kalman1D(target.y, p=9.0, q=2.0, r=16.0)
-                th = Kalman1D(target.half_width_px, p=9.0, q=2.0, r=20.0)
-            else:
-                fx.update(piece.x)
-                fy.update(piece.y)
-                tx.update(target.x)
-                ty.update(target.y)
-                th.update(target.half_width_px)
-            valid += 1
-        if i + 1 < captures:
-            time.sleep(sample_delay)
-
-    if last_img is None or last_arr is None:
-        img, arr, piece, target = capture_and_detect(serial, detector=detector)
-        return img, arr, piece, target, 1 if (piece and target) else 0
-
-    if valid >= 2 and last_piece is not None and last_target is not None:
-        last_piece = replace(last_piece, x=float(fx.x), y=float(fy.x))
-        last_target = replace(
-            last_target,
-            x=float(tx.x),
-            y=float(ty.x),
-            half_width_px=float(th.x),
-        )
-    return last_img, last_arr, last_piece, last_target, valid
 
 
 def wait_until_ready(
@@ -683,13 +579,9 @@ def main() -> None:
     p.add_argument("--coef", type=float, default=1.36, help="ms per pixel baseline")
     p.add_argument("--interval", type=float, default=0.2, help="fallback extra wait after an abnormal transition")
     p.add_argument("--max-jumps", type=int, default=0, help="0 means unlimited")
-    p.add_argument("--captures", type=int, default=3, help="screenshots to fuse with Kalman before each jump")
-    p.add_argument("--sample-delay", type=float, default=0.06, help="seconds between fused screenshots")
     p.add_argument("--min-air-time", type=float, default=0.34, help="minimum seconds to wait before checking whether the piece has landed")
     p.add_argument("--poll-delay", type=float, default=0.05, help="seconds between ready checks after a jump")
-    p.add_argument("--ready-streak", type=int, default=1, help="consecutive stable detections required before the next jump")
     p.add_argument("--ready-timeout", type=float, default=1.0, help="seconds to wait for the next stable ready state")
-    p.add_argument("--no-adapt", action="store_true", help="disable online coefficient calibration")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--debug-dir", default="debug_jump_ppo")
     p.add_argument("--raw-dir", help="save unannotated screenshots for later labeling")
@@ -722,15 +614,9 @@ def main() -> None:
     jumps = 0
     frame_idx = 0
     idle_retries = 0
-    prev_jump: JumpRecord | None = None
     last_jump_time: float | None = None
     while args.max_jumps <= 0 or jumps < args.max_jumps:
-        img, arr, piece, target, valid_obs = stable_detect(
-            args.serial,
-            captures=args.captures,
-            sample_delay=args.sample_delay,
-            detector=detector,
-        )
+        img, arr, piece, target = capture_and_detect(args.serial, detector=detector)
         h, w, _ = arr.shape
         if piece is None:
             if last_jump_time is not None and time.time() - last_jump_time < args.ready_timeout:
@@ -744,11 +630,6 @@ def main() -> None:
                 time.sleep(1.5 if idle_retries > 1 else 1.0)
             continue
 
-        if prev_jump is not None and not args.no_adapt:
-            coef, calib_msg = update_coef_from_landing(coef, prev_jump, piece)
-            if calib_msg:
-                print(calib_msg)
-            prev_jump = None
         if target is not None:
             last_jump_time = None
 
@@ -762,7 +643,7 @@ def main() -> None:
                 debug_dir / f"{jumps:04d}_no_target.png",
                 piece,
                 None,
-                f"target not found obs={valid_obs}/{max(1, args.captures)}",
+                "target not found",
             )
             time.sleep(0.8)
             continue
@@ -782,7 +663,7 @@ def main() -> None:
             f"jump={jumps + 1} gap_px={gap_px:.1f} half_px={target.half_width_px:.1f} "
             f"gap_w={gap_world:.2f} half_w={half_world:.2f} action={action} "
             f"pred={pred_dist:.2f} scale={scale:.3f} coef={coef:.4f} mode={obs_mode} det={detector_name} "
-            f"obs={valid_obs}/{max(1, args.captures)} press={press_ms}ms"
+            f"press={press_ms}ms"
         )
         print(text)
         save_raw_image(img, raw_dir, frame_idx)
@@ -793,7 +674,6 @@ def main() -> None:
             break
 
         long_press(args.serial, w // 2, int(h * 0.75), press_ms)
-        prev_jump = JumpRecord(piece=piece, target=target, gap_px=gap_px, press_ms=press_ms)
         jumps += 1
         last_jump_time = time.time()
         time.sleep(args.min_air_time)
