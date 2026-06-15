@@ -227,7 +227,7 @@ class RealJumpEnv:
         if died:
             print("死了")
             return np.zeros(self.obs_dim, np.float32), -self.death_penalty, True, False, {"died": True}
-
+        print("没死")
         # 存活:奖励 = 屏幕分数增量;读不到分数则记 +1(存活计数)
         if self.score_reader and self.score_reader.ready and cur_score is not None:
             reward = float(max(0, cur_score - self.prev_score))
