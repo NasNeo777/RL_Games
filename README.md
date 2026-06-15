@@ -102,10 +102,10 @@
 <tr>
 <td width="50%" valign="top">
 
-<h3 align="center">📸 跳一跳原图 PPO</h3>
-<p align="center"><i>整帧截图先裁成决策视野,再缩到 84×84 灰度图直接喂 CNN</i></p>
-<p align="center"><code>./start.sh --env jump_screen --algo ppo</code></p>
-<p align="center">🏆 连续踩中 25 块台子 &nbsp;·&nbsp; ⏱️ <b>刚开训</b>,先看回报爬升更稳妥<br>🖼️ 图像观测,只支持 PPO &nbsp;·&nbsp; 🔗 训练与 ADB 真机推理共用同一套裁剪预处理</p>
+<h3 align="center">🕹️ 跳一跳 PPO</h3>
+<p align="center"><i>先识别缺口和台宽,再让 PPO 预测合适的蓄力档位</i></p>
+<p align="center"><code>./start.sh --env jump --algo ppo</code></p>
+<p align="center">🏆 连续踩中 25 块台子 &nbsp;·&nbsp; ⏱️ 作为对照算法可直接开练<br>📐 结构化观测 &nbsp;·&nbsp; 🤖 和 ADB 真机脚本的“检测后决策”链路一致</p>
 
 </td>
 <td width="50%" valign="top">
@@ -120,7 +120,7 @@
 </table>
 
 > 💡 **算法怎么选?** 向量观测的游戏 `dqn` / `ppo` 都行;`2048` 务必用专属的
-> `td2048`(比通用算法快几个数量级);`mario` / `jump_screen` 这类图像观测只支持 `ppo`。
+> `td2048`(比通用算法快几个数量级);`mario` 这类图像观测只支持 `ppo`。
 
 ---
 

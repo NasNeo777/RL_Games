@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Use the trained jump_pixels_ppo checkpoint to play Jump on an adb device."""
+"""Detect the piece/target first, then let the trained PPO checkpoint play Jump over adb."""
 
 from __future__ import annotations
 
@@ -24,7 +24,6 @@ from rl_lab.envs.jump import (
     HALF_MAX,
     HALF_MIN,
     JumpPixelsEnv,
-    preprocess_jump_screen,
 )
 
 
@@ -448,11 +447,6 @@ def vector_obs(gap_px: float, half_width_px: float, screen_w: int) -> tuple[np.n
     return obs, gap_world, half_world
 
 
-def screen_obs(arr: np.ndarray, gap_px: float, half_width_px: float, screen_w: int) -> tuple[np.ndarray, float, float]:
-    gap_world, half_world = estimate_world_state(gap_px, half_width_px, screen_w)
-    return preprocess_jump_screen(arr), gap_world, half_world
-
-
 def action_to_distance(action: int) -> float:
     return D_MIN + action / 40.0 * (D_MAX - D_MIN)
 
@@ -610,7 +604,7 @@ def wait_until_ready(
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--serial", help="adb serial; default uses the only attached device")
-    p.add_argument("--ckpt", default="runs/jump_screen_ppo/best.pt")
+    p.add_argument("--ckpt", default="runs/jump_ppo/best.pt")
     p.add_argument("--coef", type=float, default=1.36, help="ms per pixel baseline")
     p.add_argument("--interval", type=float, default=0.2, help="fallback extra wait after an abnormal transition")
     p.add_argument("--max-jumps", type=int, default=0, help="0 means unlimited")
@@ -626,9 +620,8 @@ def main() -> None:
     args = p.parse_args()
 
     _, agent, ckpt = load_agent_for_demo(args.ckpt)
-    if ckpt.get("env") == "jump_screen":
-        obs_mode = "screen"
-    elif ckpt.get("env") == "jump_pixels" or ckpt.get("algo") == "ppo":
+    env_name = ckpt.get("env")
+    if env_name == "jump_pixels":
         obs_mode = "image"
     else:
         obs_mode = "vector"
@@ -688,8 +681,6 @@ def main() -> None:
         gap_px = math.hypot(target.x - piece.x, target.y - piece.y)
         if obs_mode == "vector":
             obs, gap_world, half_world = vector_obs(gap_px, target.half_width_px, w)
-        elif obs_mode == "screen":
-            obs, gap_world, half_world = screen_obs(arr, gap_px, target.half_width_px, w)
         else:
             obs, gap_world, half_world = synthetic_obs(gap_px, target.half_width_px, w)
         action = int(agent.act(obs, deterministic=True))

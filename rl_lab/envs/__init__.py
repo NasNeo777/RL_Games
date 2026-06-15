@@ -2,7 +2,7 @@
 from .double_pendulum import DoublePendulumEnv
 from .flappy_bird import FlappyBirdEnv
 from .game_2048 import Game2048Env
-from .jump import JumpEnv, JumpPixelsEnv, JumpScreenEnv
+from .jump import JumpEnv, JumpPixelsEnv
 from .mario import MarioEnv
 from .mountain_car import MountainCarEnv
 from .snake import SnakeEnv
@@ -14,7 +14,6 @@ ENVS = {
     "flappy_bird": FlappyBirdEnv,
     "jump": JumpEnv,
     "jump_pixels": JumpPixelsEnv,
-    "jump_screen": JumpScreenEnv,
     "mario": MarioEnv,
     "mountain_car": MountainCarEnv,
     "snake": SnakeEnv,

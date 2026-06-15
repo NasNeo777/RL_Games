@@ -89,7 +89,7 @@ class SB3PPOAgent(BaseAgent):
             or (self.N_ENVS_IMAGE if image_obs else 1)
         image_hp = dict(self.HP_IMAGE)
         ent_decay = dict(self.ENT_DECAY)
-        if args.env in {"jump_pixels", "jump_screen"}:
+        if args.env == "jump_pixels":
             image_hp = dict(self.HP_IMAGE_JUMP)
             ent_decay = dict(self.ENT_DECAY_JUMP)
         if n_envs > 1:
