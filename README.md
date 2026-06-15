@@ -102,18 +102,25 @@
 <tr>
 <td width="50%" valign="top">
 
+<h3 align="center">📸 跳一跳原图 PPO</h3>
+<p align="center"><i>整帧截图先裁成决策视野,再缩到 84×84 灰度图直接喂 CNN</i></p>
+<p align="center"><code>./start.sh --env jump_screen --algo ppo</code></p>
+<p align="center">🏆 连续踩中 25 块台子 &nbsp;·&nbsp; ⏱️ <b>刚开训</b>,先看回报爬升更稳妥<br>🖼️ 图像观测,只支持 PPO &nbsp;·&nbsp; 🔗 训练与 ADB 真机推理共用同一套裁剪预处理</p>
+
+</td>
+<td width="50%" valign="top">
+
 <h3 align="center">➕ 你的游戏?</h3>
 <p align="center"><i>三五行接入任何 Gymnasium 游戏</i></p>
 <p align="center"><code>详见下方「接入新游戏」</code></p>
 <p align="center">🛠️ 继承 <code>GymEnv</code> 填个 env_id 就能跑<br>前端零代码——演示画面自动录制播放</p>
 
 </td>
-<td width="50%" valign="top"></td>
 </tr>
 </table>
 
 > 💡 **算法怎么选?** 向量观测的游戏 `dqn` / `ppo` 都行;`2048` 务必用专属的
-> `td2048`(比通用算法快几个数量级);`mario` 只支持 `ppo`。
+> `td2048`(比通用算法快几个数量级);`mario` / `jump_screen` 这类图像观测只支持 `ppo`。
 
 ---
 

@@ -24,6 +24,7 @@ from rl_lab.envs.jump import (
     HALF_MAX,
     HALF_MIN,
     JumpPixelsEnv,
+    preprocess_jump_screen,
 )
 
 
@@ -447,6 +448,11 @@ def vector_obs(gap_px: float, half_width_px: float, screen_w: int) -> tuple[np.n
     return obs, gap_world, half_world
 
 
+def screen_obs(arr: np.ndarray, gap_px: float, half_width_px: float, screen_w: int) -> tuple[np.ndarray, float, float]:
+    gap_world, half_world = estimate_world_state(gap_px, half_width_px, screen_w)
+    return preprocess_jump_screen(arr), gap_world, half_world
+
+
 def action_to_distance(action: int) -> float:
     return D_MIN + action / 40.0 * (D_MAX - D_MIN)
 
@@ -620,7 +626,12 @@ def main() -> None:
     args = p.parse_args()
 
     _, agent, ckpt = load_agent_for_demo(args.ckpt)
-    obs_mode = "image" if ckpt.get("env") == "jump_pixels" or ckpt.get("algo") == "ppo" else "vector"
+    if ckpt.get("env") == "jump_screen":
+        obs_mode = "screen"
+    elif ckpt.get("env") == "jump_pixels" or ckpt.get("algo") == "ppo":
+        obs_mode = "image"
+    else:
+        obs_mode = "vector"
     print(f"loaded {args.ckpt} ({ckpt['env']} / {ckpt['algo']} / {obs_mode})")
 
     debug_dir = Path(args.debug_dir)
@@ -677,6 +688,8 @@ def main() -> None:
         gap_px = math.hypot(target.x - piece.x, target.y - piece.y)
         if obs_mode == "vector":
             obs, gap_world, half_world = vector_obs(gap_px, target.half_width_px, w)
+        elif obs_mode == "screen":
+            obs, gap_world, half_world = screen_obs(arr, gap_px, target.half_width_px, w)
         else:
             obs, gap_world, half_world = synthetic_obs(gap_px, target.half_width_px, w)
         action = int(agent.act(obs, deterministic=True))
