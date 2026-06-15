@@ -610,7 +610,7 @@ def wait_until_ready(
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--serial", help="adb serial; default uses the only attached device")
-    p.add_argument("--ckpt", default="runs/jump_pixels_ppo/best.pt")
+    p.add_argument("--ckpt", default="runs/jump_screen_ppo/best.pt")
     p.add_argument("--coef", type=float, default=1.36, help="ms per pixel baseline")
     p.add_argument("--interval", type=float, default=0.2, help="fallback extra wait after an abnormal transition")
     p.add_argument("--max-jumps", type=int, default=0, help="0 means unlimited")
