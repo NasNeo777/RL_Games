@@ -55,7 +55,7 @@ class ScoreReader:
     模板缺失时 `read()` 返回 None,训练循环自动退化为「存活计数」奖励。
     """
 
-    def __init__(self, region_frac=(0.04, 0.06, 0.34, 0.14), thresh=110):
+    def __init__(self, region_frac=(0.095, 0.165, 0.455, 0.240), thresh=110):
         # region_frac: 分数区域占全屏的比例 (x0, y0, x1, y1)
         self.region_frac = region_frac
         self.thresh = thresh
@@ -294,7 +294,7 @@ def main() -> None:
     # 分数标定
     p.add_argument("--calibrate-score", action="store_true", help="裁分数区域和数字供人工标注后退出")
     p.add_argument("--score-region", type=float, nargs=4, metavar=("X0", "Y0", "X1", "Y1"),
-                   default=[0.04, 0.06, 0.34, 0.14], help="分数区域占全屏比例")
+                   default=[0.095, 0.165, 0.455, 0.240], help="分数区域占全屏比例(默认按 Pixel 8 标定)")
     args = p.parse_args()
 
     reader = ScoreReader(region_frac=tuple(args.score_region))
