@@ -168,7 +168,7 @@ class RealJumpEnv:
         self.air_time = air_time
         self.death_penalty = death_penalty
         self.max_steps = max_steps
-        self.obs_dim = 3                 # [目标框宽, 目标框高, 到目标中心距离],均按屏宽归一
+        self.obs_dim = 4                 # [dx, dy, 目标框宽, 目标框高],均按屏宽归一
         self.n_actions = levels
         self.prev_score = 0
         self.W = self.H = None
@@ -200,10 +200,11 @@ class RealJumpEnv:
 
     def _obs(self, piece, target) -> np.ndarray:
         x0, y0, x1, y1 = target.bbox
+        dx = (target.x - piece.x) / self.W
+        dy = (target.y - piece.y) / self.W
         box_w = (x1 - x0) / self.W
         box_h = (y1 - y0) / self.W            # 同按屏宽归一,宽高同尺度
-        dist = float(np.hypot(target.x - piece.x, target.y - piece.y)) / self.W
-        return np.array([box_w, box_h, dist], dtype=np.float32)
+        return np.array([dx, dy, box_w, box_h], dtype=np.float32)
 
     def reset(self) -> np.ndarray | None:
         """确保进入可玩状态(死了就点重开),返回首个观测。"""
@@ -284,7 +285,9 @@ def train(env: RealJumpEnv, agent, episodes: int, out_dir: Path, save_every: int
         ep_return, steps = 0.0, 0
         episode_buf = []
         while True:
-            dist_px = float(obs[2]) * (env.W or 1080)   # obs = [框宽, 框高, 距离]
+            dx_px = float(obs[0]) * (env.W or 1080)
+            dy_px = float(obs[1]) * (env.W or 1080)
+            dist_px = float(np.hypot(dx_px, dy_px))     # obs = [dx, dy, 框宽, 框高]
             # 自己做 ε 分支:便于标注「探索/利用」,也保证 ε 可续训。
             #   探索:暖启动时取线性估计档 ±window;否则全档随机。利用:DQN 贪心。
             explore = rng.random() < getattr(agent, "epsilon", 0.05)
@@ -396,6 +399,12 @@ def main() -> None:
     if args.resume and (out_dir / "latest.pt").exists():
         from rl_lab.algos.base import BaseAgent
         sd = BaseAgent.load_checkpoint(out_dir / "latest.pt")
+        ckpt_obs_dim = int(sd.get("obs_dim", env.obs_dim)) if isinstance(sd, dict) else env.obs_dim
+        if ckpt_obs_dim != env.obs_dim:
+            raise SystemExit(
+                f"latest.pt 的 obs_dim={ckpt_obs_dim}, 当前代码需要 obs_dim={env.obs_dim}。"
+                " 这是因为观测已从 [宽,高,距离] 改成 [dx,dy,宽,高]；请删掉旧 ckpt 或换新 out-dir 重练。"
+            )
         agent.load_state_dict(sd["state_dict"] if "state_dict" in sd else sd)
         extra = sd.get("extra", {}) if isinstance(sd, dict) else {}
         agent.steps = int(extra.get("steps", 0))         # 续上 ε 衰减进度
