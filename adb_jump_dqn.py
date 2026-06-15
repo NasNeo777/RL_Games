@@ -4,7 +4,7 @@
 和 `adb_jump_ppo.py`(纯线性 press_ms = coef×gap_px)不同,这里**直接在真手机上
 做强化学习**:
 
-    观测  obs   = 棋子落脚点到目标台中心的像素距离(归一化,1 维)
+    观测  obs   = [目标台框宽, 目标台框高, 棋子→目标中心距离](按屏宽归一,3 维)
     动作  action= 一档按压时间(离散 K 档 → press_ms)
     奖励  reward= 屏幕上的分数增量(读不到分数时退化为「存活 +1」)
     终止        = 分数归零 / 摔死(piece 检测不到)→ 惩罚,重开一局
@@ -168,7 +168,7 @@ class RealJumpEnv:
         self.air_time = air_time
         self.death_penalty = death_penalty
         self.max_steps = max_steps
-        self.obs_dim = 1
+        self.obs_dim = 3                 # [目标框宽, 目标框高, 到目标中心距离],均按屏宽归一
         self.n_actions = levels
         self.prev_score = 0
         self.W = self.H = None
@@ -199,8 +199,11 @@ class RealJumpEnv:
         return None, last_piece, last_target
 
     def _obs(self, piece, target) -> np.ndarray:
-        gap_px = float(np.hypot(target.x - piece.x, target.y - piece.y))
-        return np.array([gap_px / self.W], dtype=np.float32)
+        x0, y0, x1, y1 = target.bbox
+        box_w = (x1 - x0) / self.W
+        box_h = (y1 - y0) / self.W            # 同按屏宽归一,宽高同尺度
+        dist = float(np.hypot(target.x - piece.x, target.y - piece.y)) / self.W
+        return np.array([box_w, box_h, dist], dtype=np.float32)
 
     def reset(self) -> np.ndarray | None:
         """确保进入可玩状态(死了就点重开),返回首个观测。"""
@@ -267,7 +270,7 @@ def train(env: RealJumpEnv, agent, episodes: int, out_dir: Path, save_every: int
             return
         ep_return, steps = 0.0, 0
         while True:
-            dist_px = float(obs[0]) * (env.W or 1080)
+            dist_px = float(obs[2]) * (env.W or 1080)   # obs = [框宽, 框高, 距离]
             # 探索时围绕线性估计取档(暖启动),否则用 DQN 贪心;
             # warmup_coef<=0 时退回 agent 自带的纯随机 ε-贪心。
             if warmup_coef > 0 and rng.random() < getattr(agent, "epsilon", 0.05):
