@@ -6,7 +6,7 @@
 
 训练全程可视化:浏览器里看演示动画、训练曲线实时爬升
 
-<img src="https://img.shields.io/badge/Python-3.13-3776ab?logo=python&logoColor=white" alt="Python">&nbsp;<img src="https://img.shields.io/badge/PyTorch-DQN%20·%20PPO-ee4c2c?logo=pytorch&logoColor=white" alt="PyTorch">&nbsp;<img src="https://img.shields.io/badge/游戏-7_款-66bb6a" alt="games">&nbsp;<img src="https://img.shields.io/badge/算法-4_种-4fc3f7" alt="algos">&nbsp;<img src="https://img.shields.io/badge/前端依赖-0-8b98a5" alt="zero-deps">
+<img src="https://img.shields.io/badge/Python-3.13-3776ab?logo=python&logoColor=white" alt="Python">&nbsp;<img src="https://img.shields.io/badge/PyTorch-DQN%20·%20PPO-ee4c2c?logo=pytorch&logoColor=white" alt="PyTorch">&nbsp;<img src="https://img.shields.io/badge/游戏-8_款-66bb6a" alt="games">&nbsp;<img src="https://img.shields.io/badge/算法-4_种-4fc3f7" alt="algos">&nbsp;<img src="https://img.shields.io/badge/前端依赖-0-8b98a5" alt="zero-deps">
 
 </div>
 
@@ -92,12 +92,23 @@
 </td>
 <td width="50%" valign="top">
 
+<h3 align="center">🕹️ 跳一跳</h3>
+<p align="center"><i>蓄力一跳,稳稳落在下一块台子上,差一点就摔进缝里</i></p>
+<p align="center"><code>./start.sh --env jump --algo dqn</code></p>
+<p align="center">🏆 连续踩中 25 块台子 &nbsp;·&nbsp; ⏱️ <b>约 1 分钟练成</b>(实测约 4000 步)<br>🎲 随机性:台距与台宽 &nbsp;·&nbsp; 🎯 看缺口调力度,带容差的回归题</p>
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
 <h3 align="center">➕ 你的游戏?</h3>
 <p align="center"><i>三五行接入任何 Gymnasium 游戏</i></p>
 <p align="center"><code>详见下方「接入新游戏」</code></p>
 <p align="center">🛠️ 继承 <code>GymEnv</code> 填个 env_id 就能跑<br>前端零代码——演示画面自动录制播放</p>
 
 </td>
+<td width="50%" valign="top"></td>
 </tr>
 </table>
 
@@ -189,9 +200,9 @@ agent 不直接看 240×256 RGB 原始画面:跳帧 4(相邻两帧取 max 去闪
 </details>
 
 <details>
-<summary><b>🎲 三个自制随机环境的设计(snake / 2048 / tetris)</b></summary>
+<summary><b>🎲 自制随机环境的设计(snake / 2048 / tetris / jump)</b></summary>
 
-三个全程带随机性的纯 Python 环境(零依赖),agent 背不下动作序列,
+全程带随机性的纯 Python 环境(零依赖),agent 背不下动作序列,
 只能学泛化策略:
 
 - **snake**(`envs/snake.py`):食物随机刷新。观测 10 维,以蛇头朝向
@@ -205,6 +216,10 @@ agent 不直接看 240×256 RGB 原始画面:跳帧 4(相邻两帧取 max 去闪
   "落点选择"方案(旋转 4 × 列 10 = 40 个动作,一步落一块,逐帧操作
   对 MLP 太难);观测 34 维(每列高度、每列洞数、当前块 + 下一块
   one-hot);奖励鼓励连消(1/2/3/4 行 = 1/3/5/8 分)、惩罚造洞。
+- **jump**(`envs/jump.py`):跳一跳。每步台距与台宽都重新随机。观测
+  只有 2 维(到下一块台子中心的距离、台子半宽),动作是 41 档蓄力
+  力度 → 跳跃距离;本质是一道带容差的回归题——看缺口调力度,落在
+  台面上即得分(越靠台心奖励越高),摔进缝里就结束。DQN 约 4000 步练成。
 
 </details>
 
@@ -262,7 +277,7 @@ class MyGameEnv(GymEnv):
 
 ```
 rl_lab/
-  envs/        环境(注册表 + 7 款游戏)
+  envs/        环境(注册表 + 8 款游戏)
   algos/       算法(注册表 + DQN / PPO / td2048)
   train.py     持续训练入口
   server.py    演示服务器(纯标准库,零依赖)

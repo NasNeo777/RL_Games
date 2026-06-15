@@ -461,6 +461,169 @@ const RENDERERS = {
       ctx.fillRect(bx, by, bw * frac, bh);
     }
   },
+
+  // 跳一跳:2.5D 等距视角。每一帧 = 一次跳跃,分三段连续播放:
+  //   ① 蓄力(棋子下压,力度条按"按压时长决定的跳跃距离"涨)
+  //   ② 起跳(沿抛物线飞向目标台,镜头不动)
+  //   ③ 落定后镜头平移,把刚踩中的台子拉回锚点 —— 因为这一帧结尾的取景
+  //      正好等于下一帧开头的取景,连跳之间画面完全连续(不会"跳变")。
+  jump(ctx, W, H, spec, frames, fIdx, frac) {
+    const f = frames[fIdx];
+    const nf = frames[fIdx + 1];           // 下一帧,用来提前画出即将滑入的新台子
+    const CHARGE_END = 0.24, JUMP_END = 0.66;
+    const ease = t => t * t * (3 - 2 * t);
+    ctx.clearRect(0, 0, W, H);
+    // 暖粉灰背景
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, "#d8bab7"); bg.addColorStop(1, "#c39d9a");
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+
+    const standing = Math.abs(f.x1 - f.x0) < 1e-6;
+    const dist = f.x1 - f.x0;
+    const powerN = Math.max(0, Math.min(1,
+      (dist - spec.d_min) / (spec.d_max - spec.d_min)));
+
+    // 等距投影:进度坐标 s → 屏幕。锚点固定在偏左下,当前台子停在那里。
+    const STEP_X = W * 0.15, STEP_Y = W * 0.075;   // 每 1 进度单位的屏幕位移
+    const SCALE = W * 0.13;                         // 半宽 → 台面菱形横向半径
+    const anchorX = W * 0.36, anchorY = H * 0.70;
+    // 镜头中心(进度坐标):蓄力/起跳阶段锁在起跳台;落定后平移到目标台。
+    let camS = f.x0;
+    if (!standing && f.ok && frac > JUMP_END)
+      camS = f.x0 + dist * ease((frac - JUMP_END) / (1 - JUMP_END));
+    const proj = s => [anchorX + (s - camS) * STEP_X, anchorY - (s - camS) * STEP_Y];
+
+    const theme = shape => shape === 1
+      ? { top: "#e6ebed", lft: "#f3f6f7", rgt: "#bcc6ca", ring: "#9aa6ab" }  // 圆台:灰白
+      : { top: "#3a8059", lft: "#eef3f3", rgt: "#cdd7d8", ring: null };      // 方台:绿
+
+    function platform(center, half, shape) {
+      const [cx, cy] = proj(center);
+      const rx = half * SCALE, ry = rx * 0.5;          // 2:1 等距
+      const h = Math.max(rx * 1.05, W * 0.045);        // 柱高
+      const c = theme(shape);
+      ctx.fillStyle = "rgba(60,30,40,.18)";            // 地面软阴影
+      ctx.beginPath();
+      ctx.ellipse(cx + rx * 0.35, cy + h + ry * 0.6, rx * 1.15, ry * 1.15, 0, 0, 7);
+      ctx.fill();
+      if (shape === 1) {                                // 圆柱
+        ctx.fillStyle = c.rgt;
+        ctx.beginPath();
+        ctx.moveTo(cx - rx, cy);
+        ctx.lineTo(cx - rx, cy + h);
+        ctx.ellipse(cx, cy + h, rx, ry, 0, Math.PI, 0, true);
+        ctx.lineTo(cx + rx, cy);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = c.top;
+        ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, 7); ctx.fill();
+        ctx.strokeStyle = c.ring; ctx.lineWidth = Math.max(2, rx * 0.22);
+        ctx.beginPath(); ctx.ellipse(cx, cy, rx * 0.58, ry * 0.58, 0, 0, 7); ctx.stroke();
+      } else {                                          // 方块
+        const T = [cx, cy - ry], R = [cx + rx, cy], B = [cx, cy + ry], L = [cx - rx, cy];
+        ctx.fillStyle = c.lft;                          // 左侧面
+        ctx.beginPath();
+        ctx.moveTo(L[0], L[1]); ctx.lineTo(B[0], B[1]);
+        ctx.lineTo(B[0], B[1] + h); ctx.lineTo(L[0], L[1] + h);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = c.rgt;                          // 右侧面
+        ctx.beginPath();
+        ctx.moveTo(R[0], R[1]); ctx.lineTo(B[0], B[1]);
+        ctx.lineTo(B[0], B[1] + h); ctx.lineTo(R[0], R[1] + h);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = c.top;                          // 顶面
+        ctx.beginPath();
+        ctx.moveTo(T[0], T[1]); ctx.lineTo(R[0], R[1]);
+        ctx.lineTo(B[0], B[1]); ctx.lineTo(L[0], L[1]);
+        ctx.closePath(); ctx.fill();
+      }
+      return [cx, cy, rx, ry];
+    }
+
+    // 由远及近画:下一块新台子(滑入)→ 目标台 → 起跳台,近台压住远台
+    if (nf && Math.abs(nf.p1[0] - f.p1[0]) > 1e-6) platform(nf.p1[0], nf.p1[1], nf.s1);
+    platform(f.p1[0], f.p1[1], f.s1);
+    const [, , rx0, ry0] = platform(f.p0[0], f.p0[1], f.s0);
+
+    // 正中靶心:目标台心冒颗星(随镜头一起动)
+    if (f.perfect) {
+      const [tx, ty] = proj(f.p1[0]);
+      ctx.fillStyle = "#ffd54f"; ctx.font = `bold ${Math.round(W * 0.04)}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.fillText("★", tx, ty + W * 0.012);
+      ctx.textAlign = "left";
+    }
+
+    // 棋子位置 + 形变:三段。ps=当前进度坐标,lift=离地高度(像素)
+    const apex = W * 0.10 + 0.32 * Math.abs(dist) * STEP_X;
+    let ps = f.x0, lift = 0, sx = 1, sy = 1;
+    if (standing) {                          // 开局静止帧:站在起跳台
+      // ps/lift 取默认值
+    } else if (frac < CHARGE_END) {          // ① 蓄力:下压,力度越大压越狠
+      const ct = frac / CHARGE_END;
+      sy = 1 - 0.34 * powerN * ct; sx = 1 + 0.20 * powerN * ct;
+    } else if (f.ok && frac < JUMP_END) {    // ② 起跳:抛物线飞向目标
+      const jt = (frac - CHARGE_END) / (JUMP_END - CHARGE_END);
+      ps = f.x0 + dist * jt;
+      lift = apex * Math.sin(Math.PI * jt);
+    } else if (f.ok) {                        // ③ 落定:棋子贴目标台,镜头平移把它拉回锚点
+      ps = f.x1;
+    } else {                                  // 失败:冲出去栽进缝里
+      const jt = (frac - CHARGE_END) / (1 - CHARGE_END);
+      ps = f.x0 + dist * jt;
+      lift = apex * Math.sin(Math.PI * jt)
+           - (jt > 0.55 ? (jt - 0.55) / 0.45 * H * 0.6 : 0);
+    }
+    const [bx, footY] = proj(ps);
+    const by = footY - lift;
+
+    // 落地影子(贴地时清晰,腾空时缩小变淡)
+    if (lift < apex * 0.92) {
+      const shf = Math.max(0.15, 1 - Math.max(0, lift) / apex);
+      ctx.fillStyle = `rgba(40,20,30,${0.3 * shf})`;
+      ctx.beginPath();
+      ctx.ellipse(bx, footY, rx0 * 0.5 * shf, ry0 * 0.5 * shf, 0, 0, 7);
+      ctx.fill();
+    }
+
+    // 棋子本体:黑色,锥形身子 + 球头 + 高光(按 sx/sy 形变)
+    const ch = W * 0.135 * sy, headR = W * 0.135 * 0.19, bw = W * 0.135 * 0.3 * sx;
+    const cyHead = by - ch + headR;
+    ctx.fillStyle = "#222129";
+    ctx.beginPath();
+    ctx.moveTo(bx - bw, by);
+    ctx.quadraticCurveTo(bx - bw * 0.55, by - ch * 0.55, bx, cyHead);
+    ctx.quadraticCurveTo(bx + bw * 0.55, by - ch * 0.55, bx + bw, by);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(bx, by, bw, bw * 0.42, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(bx, cyHead, headR, 0, 7); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,.32)";
+    ctx.beginPath(); ctx.arc(bx - headR * 0.3, cyHead - headR * 0.3, headR * 0.38, 0, 7); ctx.fill();
+
+    // 蓄力力度条:蓄力阶段在棋子上方涨起,直观展示"按压时长 → 跳多远"
+    if (!standing && frac < CHARGE_END) {
+      const ct = frac / CHARGE_END, bw2 = W * 0.16, bh2 = W * 0.018;
+      const bx2 = bx - bw2 / 2, by2 = by - ch - W * 0.07;
+      ctx.fillStyle = "rgba(0,0,0,.18)";
+      ctx.beginPath(); ctx.roundRect(bx2, by2, bw2, bh2, bh2 / 2); ctx.fill();
+      ctx.fillStyle = "#ff7043";
+      ctx.beginPath(); ctx.roundRect(bx2, by2, bw2 * powerN * ct, bh2, bh2 / 2); ctx.fill();
+      ctx.fillStyle = "#5d4037"; ctx.font = `${Math.round(W * 0.022)}px sans-serif`;
+      ctx.textAlign = "center"; ctx.fillText("蓄力", bx, by2 - W * 0.012);
+      ctx.textAlign = "left";
+    }
+
+    // 比分
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,.45)"; ctx.shadowBlur = 6;
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 20px -apple-system, 'PingFang SC', sans-serif";
+    ctx.fillText(`连跳 ${f.score} / ${spec.goal}`, 16, 32);
+    ctx.restore();
+    if (!standing && !f.ok && frac > 0.6) {
+      ctx.fillStyle = "#c62828"; ctx.font = "bold 16px sans-serif";
+      ctx.fillText("✕ 没踩稳", W - 100, 32);
+    }
+  },
 };
 
 /* ===== 演示动画 ===== */
@@ -598,6 +761,7 @@ const BUDGETS = {
   flappy_bird_ppo:     { steps: 23_200_000,  src: "实测" },
   double_pendulum_ppo: { steps: 155_000_000, src: "实测" },
   snake_dqn:           { steps: 3_000_000,   src: "估算" },
+  jump_dqn:            { steps: 4_000,       src: "实测" },
   "2048_td2048":       { steps: 10_000_000,  src: "估算" },
   "2048_dqn":  { tip: "⚠️ DQN 在 2048 上极慢(百万步仍千分级),强烈建议 --algo td2048,几分钟就能合出 2048" },
   flappy_bird_dqn: { tip: "DQN 几分钟能学个大概,但 777 根管道的练成标准未见 DQN 达成过;要挂机练成请用 --algo ppo(实测约 2300 万步)" },
@@ -701,7 +865,7 @@ async function refreshStats() {
       $("metaTable").innerHTML = [
         ["环境 / 算法", `${meta.env} / ${(meta.algo || "?").toUpperCase()}`],
         ["状态", meta.solved
-          ? '<span class="badge ok">✅ 已学会稳定倒立</span>'
+          ? '<span class="badge ok">✅ 已练成</span>'
           : '<span class="badge">训练中…</span>'],
         ["训练回合", meta.episode ?? "-"],
         ["环境步数", (meta.env_steps ?? 0).toLocaleString()],
