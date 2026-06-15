@@ -104,6 +104,11 @@ let state = { run: null, which: "best", demo: null, playT: 0, lastTs: 0,
 
 function setObsPreview(spec, frame) {
   const panel = $("obsPanel"), img = $("obsPreview"), title = $("obsTitle");
+  if (spec && (spec.type === "video" || spec.type === "jump")) {
+    panel.classList.remove("show");
+    img.removeAttribute("src");
+    return;
+  }
   if (!frame || !frame.obs) {
     panel.classList.remove("show");
     img.removeAttribute("src");
@@ -495,14 +500,38 @@ const RENDERERS = {
   jump(ctx, W, H, spec, frames, fIdx, frac) {
     const f = frames[fIdx];
     const nf = frames[fIdx + 1];           // 下一帧,用来提前画出即将滑入的新台子
+    const ahead = Math.min(fIdx + 12, frames.length);
+    for (let i = fIdx; i < ahead; i++) {
+      const fr = frames[i];
+      if (fr.obs && !fr._obsImg) {
+        fr._obsImg = new Image();
+        fr._obsImg.src = fr.obs;
+      }
+    }
+    for (let i = 0; i < fIdx - 24; i++) {
+      frames[i]._obsImg = null;
+    }
+    const hasObs = !!f.obs;
+    let obsImg = null;
+    if (hasObs) {
+      if (!f._obsImg) { f._obsImg = new Image(); f._obsImg.src = f.obs; }
+      obsImg = f._obsImg.complete && f._obsImg.naturalWidth ? f._obsImg
+        : state.lastObsImg;
+    }
+    const gap = hasObs ? 10 : 0;
+    const sceneW = hasObs ? Math.round(W * 0.62) : W;
+    const panelW = W - sceneW - gap;
+    const labelH = hasObs ? 20 : 0;
     const CHARGE_END = 0.24, JUMP_END = 0.66;
     const ease = t => t * t * (3 - 2 * t);
     const lerp = (a, b, t) => a + (b - a) * t;
     ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "#0f1419";
+    ctx.fillRect(0, 0, W, H);
     // 暖粉灰背景
     const bg = ctx.createLinearGradient(0, 0, 0, H);
     bg.addColorStop(0, "#d8bab7"); bg.addColorStop(1, "#c39d9a");
-    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, sceneW, H);
 
     // 世界坐标 (a,b):+a=右前轴,+b=左前轴;两条等距斜轴让路线左右拐
     const p0 = f.p0, p1 = f.p1, land = f.land;   // [a, b, half]
@@ -514,8 +543,8 @@ const RENDERERS = {
 
     // 等距投影 (a,b)→屏幕,锚点固定在偏左下;镜头中心 (ca,cb) 锁当前台,落定后平移到目标台
     // STEP_Y/STEP_X = 0.556 对齐参考实现的 arrayRatio(每跳纵向位移 = 距离 × 该比值)
-    const STEP_X = W * 0.15, STEP_Y = W * 0.15 * 0.556, SCALE = W * 0.13;
-    const anchorX = W * 0.42, anchorY = H * 0.70;
+    const STEP_X = sceneW * 0.15, STEP_Y = sceneW * 0.15 * 0.556, SCALE = sceneW * 0.13;
+    const anchorX = sceneW * 0.42, anchorY = H * 0.70;
     let ca = p0[0], cb = p0[1];
     if (!standing && f.ok && frac > JUMP_END) {
       const e = ease((frac - JUMP_END) / (1 - JUMP_END));
@@ -539,7 +568,7 @@ const RENDERERS = {
       const [cx, cy] = proj(center[0], center[1]);
       const rx = center[2] * SCALE, ry = rx * 0.5;     // 2:1 等距
       const c = STYLES[((style % STYLES.length) + STYLES.length) % STYLES.length];
-      const h = Math.max(rx * 1.05, W * 0.045) * (c.tall ? 1.7 : 1);
+      const h = Math.max(rx * 1.05, sceneW * 0.045) * (c.tall ? 1.7 : 1);
       ctx.fillStyle = "rgba(60,30,40,.18)";            // 地面软阴影
       ctx.beginPath();
       ctx.ellipse(cx + rx * 0.35, cy + h + ry * 0.6, rx * 1.15, ry * 1.15, 0, 0, 7);
@@ -594,15 +623,15 @@ const RENDERERS = {
     // 正中靶心:目标台心冒颗星(随镜头一起动)
     if (f.perfect) {
       const [tx, ty] = proj(p1[0], p1[1]);
-      ctx.fillStyle = "#ffd54f"; ctx.font = `bold ${Math.round(W * 0.04)}px sans-serif`;
+      ctx.fillStyle = "#ffd54f"; ctx.font = `bold ${Math.round(sceneW * 0.04)}px sans-serif`;
       ctx.textAlign = "center";
-      ctx.fillText("★", tx, ty + W * 0.012);
+      ctx.fillText("★", tx, ty + sceneW * 0.012);
       ctx.textAlign = "left";
     }
 
     // 棋子位置 + 形变:蓄力 → 起跳(飞到实际落点)→ 落定(贴目标台心,镜头平移)
     // rot=腾空时绕身子翻转一整圈(对齐参考实现的 rotateBy(0.5, dir*360))
-    const apex = W * 0.10 + 0.32 * dist * STEP_X;
+    const apex = sceneW * 0.10 + 0.32 * dist * STEP_X;
     let pa = p0[0], pb = p0[1], lift = 0, sx = 1, sy = 1, rot = 0;
     if (standing) {                          // 开局静止帧:站在起跳台
       // 取默认值
@@ -637,7 +666,7 @@ const RENDERERS = {
     }
 
     // 棋子本体:黑色,锥形身子 + 球头 + 高光(按 sx/sy 形变);腾空时绕身子中心翻转
-    const ch = W * 0.135 * sy, headR = W * 0.135 * 0.19, bw = W * 0.135 * 0.3 * sx;
+    const ch = sceneW * 0.135 * sy, headR = sceneW * 0.135 * 0.19, bw = sceneW * 0.135 * 0.3 * sx;
     const cyHead = by - ch + headR;
     ctx.save();
     if (rot) {                               // 绕身子中线翻转一整圈
@@ -658,14 +687,14 @@ const RENDERERS = {
 
     // 蓄力力度条:蓄力阶段在棋子上方涨起,直观展示"按压时长 → 跳多远"
     if (!standing && frac < CHARGE_END) {
-      const ct = frac / CHARGE_END, bw2 = W * 0.16, bh2 = W * 0.018;
-      const bx2 = bx - bw2 / 2, by2 = by - ch - W * 0.07;
+      const ct = frac / CHARGE_END, bw2 = sceneW * 0.16, bh2 = sceneW * 0.018;
+      const bx2 = bx - bw2 / 2, by2 = by - ch - sceneW * 0.07;
       ctx.fillStyle = "rgba(0,0,0,.18)";
       ctx.beginPath(); ctx.roundRect(bx2, by2, bw2, bh2, bh2 / 2); ctx.fill();
       ctx.fillStyle = "#ff7043";
       ctx.beginPath(); ctx.roundRect(bx2, by2, bw2 * powerN * ct, bh2, bh2 / 2); ctx.fill();
-      ctx.fillStyle = "#5d4037"; ctx.font = `${Math.round(W * 0.022)}px sans-serif`;
-      ctx.textAlign = "center"; ctx.fillText("蓄力", bx, by2 - W * 0.012);
+      ctx.fillStyle = "#5d4037"; ctx.font = `${Math.round(sceneW * 0.022)}px sans-serif`;
+      ctx.textAlign = "center"; ctx.fillText("蓄力", bx, by2 - sceneW * 0.012);
       ctx.textAlign = "left";
     }
 
@@ -678,7 +707,30 @@ const RENDERERS = {
     ctx.restore();
     if (!standing && !f.ok && frac > 0.6) {
       ctx.fillStyle = "#c62828"; ctx.font = "bold 16px sans-serif";
-      ctx.fillText("✕ 没踩稳", W - 100, 32);
+      ctx.fillText("✕ 没踩稳", sceneW - 100, 32);
+    }
+
+    if (hasObs) {
+      ctx.fillStyle = "#141b22";
+      ctx.fillRect(sceneW + gap, 0, panelW, H);
+      if (obsImg) {
+        state.lastObsImg = obsImg;
+        ctx.imageSmoothingEnabled = false;
+        const maxW = panelW - 24;
+        const maxH = H - labelH - 24;
+        const s = Math.min(maxW / obsImg.naturalWidth, maxH / obsImg.naturalHeight);
+        const dw = obsImg.naturalWidth * s, dh = obsImg.naturalHeight * s;
+        const dx = sceneW + gap + (panelW - dw) / 2;
+        const dy = labelH + (H - labelH - dh) / 2;
+        ctx.drawImage(obsImg, dx, dy, dw, dh);
+        ctx.imageSmoothingEnabled = true;
+        ctx.strokeStyle = "#31404f";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(dx - 0.5, dy - 0.5, dw + 1, dh + 1);
+      }
+      ctx.fillStyle = "#8b98a5";
+      ctx.font = "12px -apple-system, 'PingFang SC', sans-serif";
+      ctx.fillText(spec.obs_label || "agent 观测", sceneW + gap + 12, 14, panelW - 24);
     }
   },
 };
