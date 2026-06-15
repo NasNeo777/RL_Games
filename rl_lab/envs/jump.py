@@ -465,6 +465,7 @@ class JumpPixelsEnv(JumpEnv):
     def render_spec(self):
         spec = super().render_spec()
         spec["obs_label"] = f"送给 PPO 的观测 {PIX}×{PIX} 灰度图"
+        spec["obs_live"] = True
         return spec
 
 
@@ -705,4 +706,6 @@ class JumpScreenEnv(JumpEnv):
     def render_spec(self):
         spec = super().render_spec()
         spec["obs_label"] = f"送给 PPO 的观测 {PIX}×{PIX} 灰度裁剪图"
+        spec["obs_live"] = True
+        spec["obs_crop"] = dict(OBS_CROP)
         return spec

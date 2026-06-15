@@ -101,6 +101,7 @@
 const $ = id => document.getElementById(id);
 let state = { run: null, which: "best", demo: null, playT: 0, lastTs: 0,
               autoNew: false, refreshing: false };
+const JUMP_OBS_SIZE = 84;
 
 function setObsPreview(spec, frame) {
   const panel = $("obsPanel"), img = $("obsPreview"), title = $("obsTitle");
@@ -117,6 +118,50 @@ function setObsPreview(spec, frame) {
   panel.classList.add("show");
   title.textContent = spec.obs_label || "送给 PPO 的观测";
   if (img.src !== frame.obs) img.src = frame.obs;
+}
+
+function drawLiveJumpObs(ctx, totalW, sceneW, H, panelX, panelW, labelH, spec) {
+  if (!state.jumpObsCanvas) {
+    state.jumpObsCanvas = document.createElement("canvas");
+    state.jumpObsCanvas.width = JUMP_OBS_SIZE;
+    state.jumpObsCanvas.height = JUMP_OBS_SIZE;
+    state.jumpObsCtx = state.jumpObsCanvas.getContext("2d", { willReadFrequently: true });
+  }
+  const obsCtx = state.jumpObsCtx;
+  const src = ctx.canvas;
+  const dprX = src.width / totalW;
+  const dprY = src.height / H;
+  const crop = spec.obs_crop || { left: 0, top: 0, right: 1, bottom: 1 };
+  const sx = Math.round(sceneW * crop.left * dprX);
+  const sy = Math.round(H * crop.top * dprY);
+  const sw = Math.max(1, Math.round(sceneW * (crop.right - crop.left) * dprX));
+  const sh = Math.max(1, Math.round(H * (crop.bottom - crop.top) * dprY));
+  obsCtx.clearRect(0, 0, JUMP_OBS_SIZE, JUMP_OBS_SIZE);
+  obsCtx.drawImage(src, sx, sy, sw, sh, 0, 0, JUMP_OBS_SIZE, JUMP_OBS_SIZE);
+  const data = obsCtx.getImageData(0, 0, JUMP_OBS_SIZE, JUMP_OBS_SIZE);
+  const px = data.data;
+  for (let i = 0; i < px.length; i += 4) {
+    const gray = Math.max(0, Math.min(255,
+      0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]));
+    px[i] = gray;
+    px[i + 1] = gray;
+    px[i + 2] = gray;
+    px[i + 3] = 255;
+  }
+  obsCtx.putImageData(data, 0, 0);
+
+  const maxW = panelW - 24;
+  const maxH = H - labelH - 24;
+  const s = Math.min(maxW / JUMP_OBS_SIZE, maxH / JUMP_OBS_SIZE);
+  const dw = JUMP_OBS_SIZE * s, dh = JUMP_OBS_SIZE * s;
+  const dx = panelX + (panelW - dw) / 2;
+  const dy = labelH + (H - labelH - dh) / 2;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(state.jumpObsCanvas, dx, dy, dw, dh);
+  ctx.imageSmoothingEnabled = true;
+  ctx.strokeStyle = "#31404f";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(dx - 0.5, dy - 0.5, dw + 1, dh + 1);
 }
 
 /* ===== 渲染器注册表:新游戏在这里加一个 type 对应的画法 ===== */
@@ -147,11 +192,15 @@ const RENDERERS = {
     const img = f._img.complete && f._img.naturalWidth ? f._img
       : state.lastVideoImg;                  // 没解码完就保持上一帧,不闪黑
     const hasObs = !!f.obs;
-    let obsImg = null;
+    let obsImg = null, nextObsImg = null;
     if (hasObs) {
       if (!f._obsImg) { f._obsImg = new Image(); f._obsImg.src = f.obs; }
       obsImg = f._obsImg.complete && f._obsImg.naturalWidth ? f._obsImg
         : state.lastObsImg;
+      if (nf && nf.obs) {
+        if (!nf._obsImg) { nf._obsImg = new Image(); nf._obsImg.src = nf.obs; }
+        nextObsImg = nf._obsImg.complete && nf._obsImg.naturalWidth ? nf._obsImg : null;
+      }
     }
     const labelH = hasObs ? 20 : 0, gap = hasObs ? 10 : 0;
     const mainW = hasObs ? Math.round(W * 0.62) : W;
@@ -512,11 +561,15 @@ const RENDERERS = {
       frames[i]._obsImg = null;
     }
     const hasObs = !!f.obs;
-    let obsImg = null;
+    let obsImg = null, nextObsImg = null;
     if (hasObs) {
       if (!f._obsImg) { f._obsImg = new Image(); f._obsImg.src = f.obs; }
       obsImg = f._obsImg.complete && f._obsImg.naturalWidth ? f._obsImg
         : state.lastObsImg;
+      if (nf && nf.obs) {
+        if (!nf._obsImg) { nf._obsImg = new Image(); nf._obsImg.src = nf.obs; }
+        nextObsImg = nf._obsImg.complete && nf._obsImg.naturalWidth ? nf._obsImg : null;
+      }
     }
     const gap = hasObs ? 10 : 0;
     const sceneW = hasObs ? Math.round(W * 0.62) : W;
@@ -713,7 +766,9 @@ const RENDERERS = {
     if (hasObs) {
       ctx.fillStyle = "#141b22";
       ctx.fillRect(sceneW + gap, 0, panelW, H);
-      if (obsImg) {
+      if (spec.obs_live) {
+        drawLiveJumpObs(ctx, W, sceneW, H, sceneW + gap, panelW, labelH, spec);
+      } else if (obsImg) {
         state.lastObsImg = obsImg;
         ctx.imageSmoothingEnabled = false;
         const maxW = panelW - 24;
@@ -722,7 +777,15 @@ const RENDERERS = {
         const dw = obsImg.naturalWidth * s, dh = obsImg.naturalHeight * s;
         const dx = sceneW + gap + (panelW - dw) / 2;
         const dy = labelH + (H - labelH - dh) / 2;
+        const blend = nf && nextObsImg ? Math.max(0, Math.min(1, frac)) : 0;
+        ctx.save();
+        ctx.globalAlpha = 1 - blend;
         ctx.drawImage(obsImg, dx, dy, dw, dh);
+        if (nextObsImg && blend > 0) {
+          ctx.globalAlpha = blend;
+          ctx.drawImage(nextObsImg, dx, dy, dw, dh);
+        }
+        ctx.restore();
         ctx.imageSmoothingEnabled = true;
         ctx.strokeStyle = "#31404f";
         ctx.lineWidth = 1;
