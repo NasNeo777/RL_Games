@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Detect the piece/target first, then let the trained PPO checkpoint play Jump over adb."""
+"""Detect the piece/target, then jump over adb with the empirical linear law.
+
+Press time (ms) = pixel distance from the piece's foot to the target centre
+times a constant (`--coef`, default 1.35) -- the well-known WeChat-Jump rule.
+"""
 
 from __future__ import annotations
 
@@ -14,17 +18,6 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw
-
-from rl_lab.base_agent_loader import load_agent_for_demo
-from rl_lab.envs.jump import (
-    D_MAX,
-    D_MIN,
-    GAP_MAX,
-    GAP_MIN,
-    HALF_MAX,
-    HALF_MIN,
-    JumpPixelsEnv,
-)
 
 
 @dataclass
