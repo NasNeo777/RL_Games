@@ -390,7 +390,7 @@ def main():
     p.add_argument("--press-min", type=int, default=200)
     p.add_argument("--press-max", type=int, default=1300)
     p.add_argument("--death-penalty", type=float, default=3.0)
-    p.add_argument("--coef-start", type=float, default=1.35)
+    p.add_argument("--coef-start", type=float, default=1.375)
     p.add_argument("--coef-step", type=float, default=0.025)
     p.add_argument("--coef-radius", type=int, default=6)
     p.add_argument("--coef-min", type=float, default=1.00)
