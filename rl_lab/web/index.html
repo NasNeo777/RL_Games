@@ -638,7 +638,7 @@ const RENDERERS = {
     ctx.textAlign = "left";
     ctx.restore();
 
-    // 事件闪光
+    // 事件闪光 — 蛇被打败、门升级、宝箱打开时触发金色闪屏
     if (f.event === "snake_defeated" || f.event === "gate_upgraded" || f.event === "chest_opened") {
       ctx.save();
       const a = 0.2 + 0.12 * Math.sin(now * 7);

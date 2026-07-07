@@ -109,7 +109,7 @@ class LevelConfig:
     snake_track_straight_distance: float = 4.2
     snake_track_turn_distance: float = 0.9
     snake_track_turn_bulge: float = 0.045
-    target_kills: int = 111
+    target_kills: int = 18
     segment_hp: float = 95.0
     segment_hp_growth: float = 1.18
     chest_every: int = 4
@@ -545,6 +545,10 @@ class SnakeGateEnv(BaseEnv):
         gate = self.gates[action] if 0 <= action < len(self.gates) else None
         bullet_x, aim_y = self._bullet_path_for_action(action, lane, gate)
         target, hit_y = self._target_segment(bullet_x)
+
+        # 即使不是瞄准门的子弹，也要检查弹道路径上是否有门
+        if gate is None:
+            gate = self._gate_in_path(bullet_x)
         gate_blocked = (
             gate is not None and hit_y is not None and hit_y > gate.config.y
         )
@@ -557,6 +561,10 @@ class SnakeGateEnv(BaseEnv):
             shaped += 0.1
             bullet_consumed = True
             hit_y = gate.config.y
+            self.last_floaters.append(
+                {"text": "-1", "x": self._gate_x(gate), "y": gate.config.y,
+                 "color": "#fff176", "size": "small"}
+            )
             if gate.remaining_cost <= 0 and gate.unlocked:
                 before = self.player.dps
                 self._resolve_gate(gate)
@@ -689,6 +697,17 @@ class SnakeGateEnv(BaseEnv):
         if not cfg.moving:
             return cfg.x
         return cfg.x + cfg.amplitude * sin(tau * cfg.speed * self.t)
+
+    def _gate_in_path(self, bullet_x: float) -> GateState | None:
+        half_w = (82.0 / 390.0) * 0.5
+        for g in self.gates:
+            gx = self._gate_x(g)
+            if abs(bullet_x - gx) > half_w:
+                continue
+            if not (self.config.bullet_end_y < g.config.y < self.config.bullet_start_y):
+                continue
+            return g
+        return None
 
     def _gate_roi(self, gate: GateState) -> float:
         if not gate.unlocked or gate.remaining_cost <= 0:
