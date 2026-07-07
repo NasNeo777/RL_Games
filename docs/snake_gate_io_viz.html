@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>蛇门 — DQN 输入输出可视化</title>
+<style>
+  :root { --bg: #0f1117; --card: #1a1d27; --border: #2a2d3a; --text: #c9d1d9; --dim: #6e7681; --accent: #58a6ff; --green: #3fb950; --yellow: #d2991d; --red: #f85149; --purple: #a371f7; }
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; background: var(--bg); color: var(--text); padding: 24px; line-height: 1.6; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: var(--dim); font-size: 13px; margin-bottom: 20px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .card h3 { font-size: 14px; color: var(--accent); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+  .card h3 .badge { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--accent); color: #000; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; color: var(--dim); font-weight: 500; padding: 3px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 3px 8px; border-bottom: 1px solid rgb(42,45,58,0.4); }
+  .idx { color: var(--dim); font-variant-numeric: tabular-nums; width: 28px; }
+  .bar-wrap { width: 60px; height: 6px; background: var(--border); border-radius: 3px; display: inline-block; vertical-align: middle; margin-left: 4px; }
+  .bar { height: 100%; border-radius: 3px; transition: width 0.3s; }
+  .bar.green { background: var(--green); }
+  .bar.yellow { background: var(--yellow); }
+  .bar.red { background: var(--red); }
+  .bar.purple { background: var(--purple); }
+  .bar.blue { background: var(--accent); }
+  .section-header td { color: var(--accent); font-weight: 600; padding-top: 8px; border-bottom: 2px solid var(--border); font-size: 12px; }
+  .action-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-top: 8px; }
+  .action-cell { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 8px; text-align: center; transition: all 0.2s; }
+  .action-cell:hover { border-color: var(--accent); }
+  .action-cell .act-id { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+  .action-cell .act-label { font-size: 11px; color: var(--text); font-weight: 600; }
+  .action-cell .act-detail { font-size: 10px; color: var(--dim); margin-top: 3px; line-height: 1.5; }
+  .action-cell.gate { border-left: 3px solid var(--purple); }
+  .action-cell.direct { border-left: 3px solid var(--yellow); }
+  .action-cell.smart { border-left: 3px solid var(--green); }
+  .action-cell .act-id.gate-color { color: var(--purple); }
+  .action-cell .act-id.direct-color { color: var(--yellow); }
+  .action-cell .act-id.smart-color { color: var(--green); }
+  .legend { display: flex; gap: 16px; font-size: 11px; color: var(--dim); margin-top: 10px; }
+  .legend span { display: flex; align-items: center; gap: 4px; }
+  .legend .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .note { font-size: 11px; color: var(--dim); margin-top: 8px; padding: 8px 10px; background: var(--bg); border-radius: 6px; border-left: 3px solid var(--yellow); }
+  code { font-family: 'SF Mono', 'Consolas', 'Monaco', monospace; font-size: 11px; background: rgb(255,255,255,0.06); padding: 1px 5px; border-radius: 3px; }
+  .tag { display: inline-block; font-size: 10px; padding: 1px 5px; border-radius: 3px; margin-left: 4px; }
+  .tag.gate-t { background: rgb(163,113,247,0.2); color: var(--purple); }
+  .tag.add { background: rgb(210,153,29,0.2); color: var(--yellow); }
+  .tag.mult { background: rgb(63,185,80,0.2); color: var(--green); }
+  .tag.rate { background: rgb(88,166,255,0.2); color: var(--accent); }
+</style>
+</head>
+<body>
+
+<h1>蛇门 — DQN 输入 / 输出 一览</h1>
+<p class="sub">34 维观测 → MLP[128→128→7] → 7 个 Q 值 → 取最大 → 执行动作</p>
+
+<div class="grid">
+  <!-- 输入列 -->
+  <div class="card" style="grid-row: 1 / 4;">
+    <h3>输入 — 观测向量 (34 维 float32)<span class="badge">模型输入</span></h3>
+    <table>
+      <tr class="section-header"><td colspan="4">一、全局特征 (7 维)</td></tr>
+      <tr><td class="idx">0</td><td>攻击力 (log₁₊ 归一化)</td><td>0.26</td><td><span class="bar-wrap"><span class="bar green" style="width:26%"></span></span></td></tr>
+      <tr><td class="idx">1</td><td>射速 (log₁₊ 归一化)</td><td>0.14</td><td><span class="bar-wrap"><span class="bar green" style="width:14%"></span></span></td></tr>
+      <tr><td class="idx">2</td><td>秒伤 dps (log₁₊ 归一化)</td><td>0.26</td><td><span class="bar-wrap"><span class="bar green" style="width:26%"></span></span></td></tr>
+      <tr><td class="idx">3</td><td>蛇覆盖屏幕比例</td><td>0.18</td><td><span class="bar-wrap"><span class="bar red" style="width:18%"></span></span></td></tr>
+      <tr><td class="idx">4</td><td>击杀进度 (已杀/111)</td><td>0.00</td><td><span class="bar-wrap"><span class="bar blue" style="width:0%"></span></span></td></tr>
+      <tr><td class="idx">5</td><td>剩余时间比例</td><td>1.00</td><td><span class="bar-wrap"><span class="bar blue" style="width:100%"></span></span></td></tr>
+      <tr><td class="idx">6</td><td>存活蛇段数 / 目标总数</td><td>0.02</td><td><span class="bar-wrap"><span class="bar purple" style="width:2%"></span></span></td></tr>
+
+      <tr class="section-header"><td colspan="4">二、门 0 — <span class="tag rate">射速×</span> 第 0 路, x=0.22 (6 维)</td></tr>
+      <tr><td class="idx">7</td><td>门类型编码</td><td>1.00</td><td>FIRE_RATE_MULT → 编码=1.0</td></tr>
+      <tr><td class="idx">8</td><td>当前等级 / 满级</td><td>0.00</td><td><span class="bar-wrap"><span class="bar purple" style="width:0%"></span></span></td></tr>
+      <tr><td class="idx">9</td><td>剩余充能 (clamp 500)</td><td>0.10</td><td><span class="bar-wrap"><span class="bar purple" style="width:10%"></span></span></td></tr>
+      <tr><td class="idx">10</td><td>升级奖励 (clamp 120)</td><td>0.01</td><td><span class="bar-wrap"><span class="bar purple" style="width:1%"></span></span></td></tr>
+      <tr><td class="idx">11</td><td>投入产出比 (ROI)</td><td>0.09</td><td><span class="bar-wrap"><span class="bar purple" style="width:9%"></span></span></td></tr>
+      <tr><td class="idx">12</td><td>门 X 坐标</td><td>0.22</td><td><span class="bar-wrap"><span class="bar purple" style="width:22%"></span></span></td></tr>
+
+      <tr class="section-header"><td colspan="4">三、门 1 — <span class="tag add">攻击+</span> 第 1 路, 🔴移动门 (6 维)</td></tr>
+      <tr><td class="idx">13</td><td>门类型编码</td><td>0.00</td><td>ATTACK_ADD → 编码=0.0</td></tr>
+      <tr><td class="idx">14</td><td>当前等级 / 满级</td><td>0.00</td><td><span class="bar-wrap"><span class="bar purple" style="width:0%"></span></span></td></tr>
+      <tr><td class="idx">15</td><td>剩余充能 (clamp 500)</td><td>0.08</td><td><span class="bar-wrap"><span class="bar purple" style="width:8%"></span></span></td></tr>
+      <tr><td class="idx">16</td><td>升级奖励 (clamp 120)</td><td>0.20</td><td><span class="bar-wrap"><span class="bar purple" style="width:20%"></span></span></td></tr>
+      <tr><td class="idx">17</td><td>投入产出比 (ROI)</td><td>0.57</td><td><span class="bar-wrap"><span class="bar purple" style="width:57%"></span></span></td></tr>
+      <tr><td class="idx">18</td><td>门 X 坐标（会摆动）</td><td>0.50</td><td><span class="bar-wrap"><span class="bar purple" style="width:50%"></span></span></td></tr>
+
+      <tr class="section-header"><td colspan="4">四、门 2 — <span class="tag mult">攻击×</span> 第 2 路, x=0.78 (6 维)</td></tr>
+      <tr><td class="idx">19</td><td>门类型编码</td><td>0.50</td><td>ATTACK_MULT → 编码=0.5</td></tr>
+      <tr><td class="idx">20</td><td>当前等级 / 满级</td><td>0.00</td><td><span class="bar-wrap"><span class="bar purple" style="width:0%"></span></span></td></tr>
+      <tr><td class="idx">21</td><td>剩余充能 (clamp 500)</td><td>0.14</td><td><span class="bar-wrap"><span class="bar purple" style="width:14%"></span></span></td></tr>
+      <tr><td class="idx">22</td><td>升级奖励 (clamp 120)</td><td>0.01</td><td><span class="bar-wrap"><span class="bar purple" style="width:1%"></span></span></td></tr>
+      <tr><td class="idx">23</td><td>投入产出比 (ROI)</td><td>0.08</td><td><span class="bar-wrap"><span class="bar purple" style="width:8%"></span></span></td></tr>
+      <tr><td class="idx">24</td><td>门 X 坐标</td><td>0.78</td><td><span class="bar-wrap"><span class="bar purple" style="width:78%"></span></span></td></tr>
+
+      <tr class="section-header"><td colspan="4">五、第 0 路蛇情 (3 维)</td></tr>
+      <tr><td class="idx">25</td><td>最前端蛇段深度</td><td>0.86</td><td><span class="bar-wrap"><span class="bar red" style="width:86%"></span></span> ⚠ 快到了</td></tr>
+      <tr><td class="idx">26</td><td>血量比例 (总血量/总上限)</td><td>1.00</td><td><span class="bar-wrap"><span class="bar yellow" style="width:100%"></span></span> 满血</td></tr>
+      <tr><td class="idx">27</td><td>是否有宝箱</td><td>0.00</td><td>无</td></tr>
+
+      <tr class="section-header"><td colspan="4">六、第 1 路蛇情 (3 维)</td></tr>
+      <tr><td class="idx">28</td><td>最前端蛇段深度</td><td>0.86</td><td><span class="bar-wrap"><span class="bar red" style="width:86%"></span></span> ⚠ 快到了</td></tr>
+      <tr><td class="idx">29</td><td>血量比例 (总血量/总上限)</td><td>1.00</td><td><span class="bar-wrap"><span class="bar yellow" style="width:100%"></span></span> 满血</td></tr>
+      <tr><td class="idx">30</td><td>是否有宝箱</td><td>0.00</td><td>无</td></tr>
+
+      <tr class="section-header"><td colspan="4">七、第 2 路蛇情 (3 维)</td></tr>
+      <tr><td class="idx">31</td><td>最前端蛇段深度</td><td>0.00</td><td><span class="bar-wrap"><span class="bar green" style="width:0%"></span></span> 🟢 尚无蛇</td></tr>
+      <tr><td class="idx">32</td><td>血量比例 (总血量/总上限)</td><td>0.00</td><td>该路无活蛇 → 0</td></tr>
+      <tr><td class="idx">33</td><td>是否有宝箱</td><td>0.00</td><td>无</td></tr>
+    </table>
+  </div>
+
+  <!-- 输出列：动作 -->
+  <div class="card">
+    <h3>输出 — 网络给 7 个动作各打一个 Q 分，取最高分执行<span class="badge">模型输出</span></h3>
+    <div class="action-grid">
+      <div class="action-cell gate">
+        <div class="act-id gate-color">0</div>
+        <div class="act-label">打门 0</div>
+        <div class="act-detail">射速×门<br>第 0 路</div>
+      </div>
+      <div class="action-cell gate">
+        <div class="act-id gate-color">1</div>
+        <div class="act-label">打门 1</div>
+        <div class="act-detail">攻击+门<br>第 1 路 · 🔴移动</div>
+      </div>
+      <div class="action-cell gate">
+        <div class="act-id gate-color">2</div>
+        <div class="act-label">打门 2</div>
+        <div class="act-detail">攻击×门<br>第 2 路</div>
+      </div>
+      <div class="action-cell direct">
+        <div class="act-id direct-color">3</div>
+        <div class="act-label">直射第 0 路</div>
+        <div class="act-detail">不经过门<br>直接打蛇</div>
+      </div>
+      <div class="action-cell direct">
+        <div class="act-id direct-color">4</div>
+        <div class="act-label">直射第 1 路</div>
+        <div class="act-detail">不经过门<br>直接打蛇</div>
+      </div>
+      <div class="action-cell direct">
+        <div class="act-id direct-color">5</div>
+        <div class="act-label">直射第 2 路</div>
+        <div class="act-detail">不经过门<br>直接打蛇</div>
+      </div>
+      <div class="action-cell smart">
+        <div class="act-id smart-color">6</div>
+        <div class="act-label">智能射击</div>
+        <div class="act-detail">有宝箱→打宝箱<br>无宝箱→打最险路</div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <span><span class="dot" style="background:var(--purple)"></span> 打门充能（子弹撞门，不伤蛇）</span>
+      <span><span class="dot" style="background:var(--yellow)"></span> 直射蛇段（子弹越过门打蛇）</span>
+      <span><span class="dot" style="background:var(--green)"></span> 智能寻的（自动选宝箱/危险路）</span>
+    </div>
+
+    <div class="note">
+      ⚠ <strong>关键区别</strong>：动作 0-2 的子弹瞄准线终点在<strong>门的高度</strong>—如果门在蛇段上方，子弹先撞门给门充能，蛇段不受伤。动作 3-5 子弹直接射向该路蛇段，但若弹道路径上恰好有门也会误触。
+    </div>
+  </div>
+
+  <!-- 奖励结构 -->
+  <div class="card">
+    <h3>奖励结构（每步）</h3>
+    <table>
+      <tr><td style="width:72px">基础生存</td><td><code>+0.05 × dps</code></td><td style="color:var(--dim)">初始 dps=12，约 0.6/步</td></tr>
+      <tr><td>子弹打中门</td><td><code>+0.1</code></td><td style="color:var(--dim)">充能 -1</td></tr>
+      <tr><td>门升级成功</td><td><code>+18 + 0.02×Δdps</code></td><td style="color:var(--dim)">最强的正信号</td></tr>
+      <tr><td>子弹打中蛇段</td><td>含在基础中，无额外奖励</td><td style="color:var(--dim)">子弹路径没被门拦截时触发</td></tr>
+      <tr><td>击杀蛇段</td><td><code>+shred</code>（击杀奖励）</td><td style="color:var(--dim)">含宝箱击杀的额外加分</td></tr>
+      <tr style="color:var(--red)"><td>空枪浪费</td><td><code>−0.4</code></td><td style="color:var(--dim)">既没打中门也没打中蛇段</td></tr>
+    </table>
+    <div style="margin-top:0px">&nbsp;</div>
+    <table>
+      <tr><td style="width:72px">杀死整条蛇</td><td><code>+1000</code></td><td style="color:var(--dim)">111 段全清</td></tr>
+      <tr><td style="color:var(--red)">屏幕被蛇覆满</td><td><code>−1000</code></td><td style="color:var(--dim)">coverage ≥ 88%</td></tr>
+      <tr style="color:var(--yellow)"><td>超时</td><td><code>−250</code></td><td style="color:var(--dim)">120 秒 / 1200 步 耗尽</td></tr>
+    </table>
+  </div>
+
+  <!-- 超参 -->
+  <div class="card">
+    <h3>DQN 超参数</h3>
+    <table>
+      <tr><td style="width:100px">网络结构</td><td>MLP: 34 → 128 → 128 → 7 Q 值，激活函数 Tanh</td></tr>
+      <tr><td>优化器</td><td>Adam，学习率 3×10⁻⁴，梯度裁剪 10.0</td></tr>
+      <tr><td>折扣 γ · 批量</td><td>0.99 · 128</td></tr>
+      <tr><td>经验回放</td><td>10 万条环形缓冲区</td></tr>
+      <tr><td>预热 · 目标同步</td><td>2000 步开始学习 · 每 1000 步同步目标网络</td></tr>
+      <tr><td style="color:var(--accent)">ε 探索衰减</td><td>1.0 → 0.02，线性 15 万步 <span style="color:var(--dim)">（已从 6 万步修复到 15 万）</span></td></tr>
+    </table>
+  </div>
+
+</div><!-- grid -->
+
+</body>
+</html>
