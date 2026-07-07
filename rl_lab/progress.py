@@ -36,14 +36,14 @@ BUDGETS = {
         "rough": "2 分钟",
     },
     "snake_gate_dqn": {
-        "steps": 80_000,
-        "src": "估算",
-        "rough": "几分钟",
+        "steps": 800_000,
+        "src": "估算(target_kills=111, 旧预算80k对应18杀, 线性增长+后期血量膨胀+门策略复杂度, 按6x复杂度缩放)",
+        "rough": "30-50 分钟",
     },
     "snake_gate_ppo": {
-        "steps": 120_000,
-        "src": "估算",
-        "rough": "几分钟",
+        "steps": 1_200_000,
+        "src": "估算(target_kills=111, PPO需更多样本但探索更强)",
+        "rough": "数小时",
     },
     "2048_td2048": {
         "steps": 10_000_000,

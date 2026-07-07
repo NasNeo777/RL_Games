@@ -725,20 +725,20 @@ class SnakeGateEnv(BaseEnv):
         values = [
             np.log1p(self.player.attack) / 10.0,
             np.log1p(self.player.fire_rate) / 5.0,
-            np.log1p(self.player.dps) / 12.0,
+            np.log1p(self.player.dps) / 10.0,
             self.coverage,
             self.kills / max(1, self.config.target_kills),
             max(0.0, 1.0 - self.steps / self.max_steps),
-            self._active_segment_count() / 10.0,
+            self._active_segment_count() / max(1, self.config.target_kills),
         ]
         for gate in self.gates:
             values.extend(
                 [
                     float(gate.config.gate_type) / 2.0,
                     gate.level / max(1, gate.config.max_level),
-                    np.log1p(max(0.0, gate.remaining_cost)) / 12.0,
-                    np.log1p(max(0.0, gate.current_reward)) / 8.0,
-                    self._gate_roi(gate) / 10.0,
+                    min(1.0, max(0.0, gate.remaining_cost) / 500.0),
+                    min(1.0, max(0.0, gate.current_reward) / 120.0),
+                    min(1.0, self._gate_roi(gate) / 1.0),
                     self._gate_x(gate),
                 ]
             )
@@ -749,9 +749,11 @@ class SnakeGateEnv(BaseEnv):
                 if s.lane == lane and s.status in {"entered", "alive"}
             ]
             front = max((s.depth for s in lane_segments), default=0.0)
-            hp = sum(max(0.0, s.hp) / max(1.0, s.max_hp) for s in lane_segments)
+            total_hp = sum(max(0.0, s.hp) for s in lane_segments)
+            total_max_hp = sum(max(1.0, s.max_hp) for s in lane_segments)
+            hp_ratio = total_hp / max(1.0, total_max_hp)
             chest = any(s.chest for s in lane_segments)
-            values.extend([front, min(1.0, hp / 4.0), float(chest)])
+            values.extend([front, hp_ratio, float(chest)])
         values = values[: self.obs_dim]
         values.extend([0.0] * (self.obs_dim - len(values)))
         obs = np.array(values, dtype=np.float32)
