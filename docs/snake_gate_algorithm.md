@@ -6,7 +6,7 @@
 - `player.attack`: 单发攻击强度。
 - `player.fire_rate`: 发射频率。
 - `player.dps`: `attack * fire_rate`，每秒有效输出。
-- `snake_segments`: 大蛇完整身体分段，每段包含 `lane / row / path_x / path_y / hp / max_hp / depth / status / chest`。
+- `snake_segments`: 大蛇完整身体分段，每段包含 `lane / row / path_x / path_y / renderX / renderY / entryProgress / hp / max_hp / depth / status / chest`。
 - `gates`: 门状态，每个门包含 `type / lane / x / y / moving / level / cost / reward`。
 - `action`: 智能体动作，选择打哪个门、哪条路，或宝箱优先。
 - `kills`: 已打死蛇身段数；只用于进度和奖励，不再单独判胜。
@@ -15,13 +15,13 @@
 ## 2. 变量关系
 
 - 大蛇持续下压：`coverage += snake_speed * dt`。
-- 蛇身按蛇形路径逐段入场：第一行左到右，下一行右到左，直到完整身体全部出现。
+- 蛇身按蛇形路径逐段入场：每块先从屏幕上方进入，再按入场进度游到自己的路径位置；第一行左到右，下一行右到左，直到完整身体全部出现。
 - 新蛇身出现会增加屏幕压力：`coverage += snake_push_per_segment * segment_pressure`。
 - 后段蛇身 `hp` 和 `segment_pressure` 更高，入场节奏也随进度和覆盖压力提升。
 - 击杀蛇身会减轻压力：`coverage -= snake_retreat_on_kill`。
 - 子弹穿门会消耗门成本：`gate.cost -= player.dps * dt`。
 - 门被打穿后升级，下一次成本和奖励同时增长。
-- 子弹命中蛇身会扣血：`segment.hp -= effective_damage`。
+- 子弹使用物理碰撞命中蛇身：沿子弹射线从玩家侧向上检测，先碰到哪块身体就只扣哪块血，不能越过前面的身体块打后面的块。
 - 宝箱蛇身被击破后额外提升攻击和攻速。
 
 ## 3. 数学建模

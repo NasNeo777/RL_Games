@@ -81,6 +81,7 @@ class SnakeSegment:
     status_age: float = 0.0
     chest: bool = False
     chest_opened: bool = False
+    entry_progress: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,10 @@ class LevelConfig:
     dead_clear_delay: float = 0.45
     fail_coverage: float = 0.88
     start_coverage: float = 0.18
+    segment_entry_duration: float = 0.85
+    entry_start_y: float = -0.08
+    bullet_start_y: float = 0.83
+    bullet_end_y: float = -0.08
     target_kills: int = 18
     segment_hp: float = 95.0
     segment_hp_growth: float = 1.18
@@ -266,6 +271,7 @@ class SnakeGateEnv(BaseEnv):
         segment = self.snake_segments[self.next_entry_index]
         segment.status = "entered"
         segment.status_age = 0.0
+        segment.entry_progress = 0.0
         self.next_entry_index += 1
         self.coverage = min(
             self.config.fail_coverage,
@@ -278,9 +284,15 @@ class SnakeGateEnv(BaseEnv):
         for segment in self.snake_segments:
             if segment.status in {"entered", "alive", "dead"}:
                 segment.status_age += self.config.dt
-            if segment.status == "entered" and segment.status_age >= self.config.dt:
-                segment.status = "alive"
-                segment.status_age = 0.0
+            if segment.status == "entered":
+                segment.entry_progress = min(
+                    1.0,
+                    segment.status_age
+                    / max(self.config.dt, self.config.segment_entry_duration),
+                )
+                if segment.entry_progress >= 1.0:
+                    segment.status = "alive"
+                    segment.status_age = 0.0
             elif (
                 segment.status == "dead"
                 and segment.status_age >= self.config.dead_clear_delay
@@ -311,6 +323,79 @@ class SnakeGateEnv(BaseEnv):
         progress = segment.id / max(1, self.config.target_kills - 1)
         return 1.0 + 0.8 * progress
 
+    def _smoothstep(self, value: float) -> float:
+        value = max(0.0, min(1.0, value))
+        return value * value * (3.0 - 2.0 * value)
+
+    def _segment_entry_progress(self, segment: SnakeSegment) -> float:
+        if segment.status == "pending":
+            return 0.0
+        if segment.status == "alive":
+            return 1.0
+        if segment.status == "cleared":
+            return 1.0
+        return max(0.0, min(1.0, segment.entry_progress))
+
+    def _segment_render_geometry(self, segment: SnakeSegment) -> dict[str, float]:
+        progress = self._segment_entry_progress(segment)
+        eased = self._smoothstep(progress)
+        target_x = (38.0 + segment.path_x * 314.0) / 390.0
+        target_y = (70.0 + segment.path_y * 254.0 + self.coverage * 42.0) / 693.0
+        swim = 0.012 * sin(tau * (0.42 * self.t + 0.13 * segment.front_order)) * eased
+        x = max(0.06, min(0.94, target_x + swim))
+        y = self.config.entry_start_y + (target_y - self.config.entry_start_y) * eased
+        return {
+            "x": x,
+            "y": y,
+            "w": 82.0 / 390.0,
+            "h": 42.0 / 693.0,
+            "entry_progress": progress,
+        }
+
+    def _lane_screen_x(self, lane: int) -> float:
+        lane = max(0, min(self.config.lanes - 1, lane))
+        if self.config.lanes == 3:
+            return (82.0 + lane * 112.0) / 390.0
+        return (lane + 0.5) / max(1, self.config.lanes)
+
+    def _bullet_path_for_action(
+        self, action: int, lane: int, gate: GateState | None
+    ) -> tuple[float, float]:
+        if action == 6:
+            chest = self._best_chest_segment()
+            if chest is not None:
+                return self._segment_render_geometry(chest)["x"], self.config.bullet_end_y
+        if gate is not None:
+            return self._gate_x(gate), gate.config.y
+        return self._lane_screen_x(lane), self.config.bullet_end_y
+
+    def _first_colliding_segment(
+        self, bullet_x: float
+    ) -> tuple[SnakeSegment | None, float | None]:
+        best: tuple[float, SnakeSegment] | None = None
+        start_y = self.config.bullet_start_y
+        end_y = self.config.bullet_end_y
+        for segment in self.snake_segments:
+            if segment.status not in {"entered", "alive"}:
+                continue
+            geo = self._segment_render_geometry(segment)
+            if geo["entry_progress"] <= 0.0:
+                continue
+            half_w = geo["w"] * 0.5
+            half_h = geo["h"] * 0.5
+            if not (geo["x"] - half_w <= bullet_x <= geo["x"] + half_w):
+                continue
+            top = geo["y"] - half_h
+            bottom = geo["y"] + half_h
+            if bottom < end_y or top > start_y:
+                continue
+            hit_y = min(start_y, bottom)
+            if best is None or hit_y > best[0]:
+                best = (hit_y, segment)
+        if best is None:
+            return None, None
+        return best[1], best[0]
+
     def _count_status(self, status: str) -> int:
         return sum(1 for s in self.snake_segments if s.status == status)
 
@@ -328,8 +413,13 @@ class SnakeGateEnv(BaseEnv):
         shaped = 0.05 * damage
         event = "snake_hit"
         gate = self.gates[action] if 0 <= action < len(self.gates) else None
+        bullet_x, aim_y = self._bullet_path_for_action(action, lane, gate)
+        target, hit_y = self._target_segment(bullet_x)
+        gate_blocked = (
+            gate is not None and hit_y is not None and hit_y > gate.config.y
+        )
 
-        if gate is not None:
+        if gate is not None and not gate_blocked:
             gate.remaining_cost -= damage
             event = "gate_hit"
             shaped += 0.1
@@ -342,7 +432,6 @@ class SnakeGateEnv(BaseEnv):
                 event = "gate_upgraded"
                 shaped += 18.0 + 0.02 * max(0.0, self.player.dps - before)
 
-        target = self._target_segment(lane, chest_priority=(action == 6))
         if target is not None:
             target.hp -= damage
             self.last_target_id = target.id
@@ -356,7 +445,11 @@ class SnakeGateEnv(BaseEnv):
         self.last_bullets.append(
             {
                 "lane": lane,
+                "x": round(bullet_x, 3),
+                "aimY": round(aim_y, 3),
+                "hitY": round(hit_y, 3) if hit_y is not None else None,
                 "gate": gate.id if gate else None,
+                "gateBlocked": gate_blocked,
                 "target": self.last_target_id,
             }
         )
@@ -392,31 +485,24 @@ class SnakeGateEnv(BaseEnv):
             reward += 70.0
         return reward
 
-    def _target_segment(self, lane: int, chest_priority=False):
-        targetable = [
-            s for s in self.snake_segments if s.status in {"entered", "alive"}
-        ]
-        candidates = [s for s in targetable if s.lane == lane]
-        if not candidates:
-            candidates = list(targetable)
-        if not candidates:
-            return None
-        if chest_priority:
-            chests = [s for s in candidates if s.chest]
-            if chests:
-                return max(chests, key=lambda s: s.front_order)
-        return max(candidates, key=lambda s: s.front_order)
+    def _target_segment(self, bullet_x: float):
+        return self._first_colliding_segment(bullet_x)
 
     def _lane_for_action(self, action: int) -> int:
         if 0 <= action < len(self.gates):
             return self.gates[action].config.lane
         if 3 <= action <= 5:
             return action - 3
-        return self._best_chest_lane() or int(
-            np.argmax([self._lane_threat(i) for i in range(3)])
-        )
+        chest_lane = self._best_chest_lane()
+        if chest_lane is not None:
+            return chest_lane
+        return int(np.argmax([self._lane_threat(i) for i in range(3)]))
 
     def _best_chest_lane(self):
+        chest = self._best_chest_segment()
+        return chest.lane if chest is not None else None
+
+    def _best_chest_segment(self):
         chests = [
             s
             for s in self.snake_segments
@@ -424,7 +510,7 @@ class SnakeGateEnv(BaseEnv):
         ]
         if not chests:
             return None
-        return max(chests, key=lambda s: s.front_order).lane
+        return max(chests, key=lambda s: self._segment_render_geometry(s)["y"])
 
     def _lane_threat(self, lane: int) -> float:
         return sum(
@@ -510,6 +596,13 @@ class SnakeGateEnv(BaseEnv):
                         "row": s.row,
                         "pathX": round(s.path_x, 3),
                         "pathY": round(s.path_y, 3),
+                        "renderX": round(self._segment_render_geometry(s)["x"], 3),
+                        "renderY": round(self._segment_render_geometry(s)["y"], 3),
+                        "entryProgress": round(
+                            self._segment_render_geometry(s)["entry_progress"], 3
+                        ),
+                        "collisionW": round(self._segment_render_geometry(s)["w"], 3),
+                        "collisionH": round(self._segment_render_geometry(s)["h"], 3),
                         "hp": round(max(0.0, s.hp), 2),
                         "maxHp": round(s.max_hp, 2),
                         "depth": round(s.depth, 3),

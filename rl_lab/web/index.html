@@ -424,16 +424,28 @@ const RENDERERS = {
     const laneX = lane => X(82 + lane * 112);
     const drawSnakeSegment = seg => {
       const hasPath = Number.isFinite(seg.pathX) && Number.isFinite(seg.pathY);
-      const cx = hasPath ? X(38 + seg.pathX * 314) : laneX(seg.lane || 0);
-      const cy = hasPath ? Y(70 + seg.pathY * 254 + (f.coverage || 0) * 42) : Y(105 + (seg.depth || 0) * 330 + (f.coverage || 0) * 165);
+      const hasRender = Number.isFinite(seg.renderX) && Number.isFinite(seg.renderY);
+      const cx = hasRender ? X(seg.renderX * 390) : hasPath ? X(38 + seg.pathX * 314) : laneX(seg.lane || 0);
+      const cy = hasRender ? Y(seg.renderY * 693) : hasPath ? Y(70 + seg.pathY * 254 + (f.coverage || 0) * 42) : Y(105 + (seg.depth || 0) * 330 + (f.coverage || 0) * 165);
       const hpRatio = clamp01((seg.hp || 0) / Math.max(1, seg.maxHp || 1));
       const dead = seg.status === "dead" || hpRatio <= 0;
       const entering = seg.status === "entered";
-      const w = hasPath ? X(82) : X(86 + 26 * (seg.depth || 0.1));
-      const h = hasPath ? Y(42) : Y(42 + 10 * (seg.depth || 0.1));
+      const entry = clamp01(seg.entryProgress ?? (entering ? 0.45 : 1));
+      const w = Number.isFinite(seg.collisionW) ? X(seg.collisionW * 390) : hasPath ? X(82) : X(86 + 26 * (seg.depth || 0.1));
+      const h = Number.isFinite(seg.collisionH) ? Y(seg.collisionH * 693) : hasPath ? Y(42) : Y(42 + 10 * (seg.depth || 0.1));
       ctx.save();
-      ctx.globalAlpha = dead ? 0.45 : entering ? 0.72 : 1;
+      ctx.globalAlpha = dead ? 0.45 : entering ? 0.42 + 0.58 * entry : 1;
       drawRock(cx, cy, w, h, Math.round(seg.hp || 0), null, seg.hit, hpRatio <= 0);
+      if (entering) {
+        ctx.save();
+        ctx.globalAlpha = 0.24 * entry;
+        ctx.strokeStyle = "#d9f4ff";
+        ctx.lineWidth = S(2);
+        ctx.beginPath();
+        ctx.arc(cx, cy - h * 0.18, w * (0.35 + 0.14 * entry), 0.25 * Math.PI, 0.75 * Math.PI);
+        ctx.stroke();
+        ctx.restore();
+      }
       ctx.save();
       ctx.fillStyle = "rgba(0,0,0,.36)";
       round(cx - w * .38, cy + h * .33, w * .76, S(5), S(3)); ctx.fill();
@@ -492,7 +504,7 @@ const RENDERERS = {
     ctx.restore();
     segments.slice()
       .filter(seg => seg.status !== "pending")
-      .sort((a, b) => (a.frontOrder ?? a.id ?? 0) - (b.frontOrder ?? b.id ?? 0))
+      .sort((a, b) => (a.renderY ?? a.pathY ?? 0) - (b.renderY ?? b.pathY ?? 0))
       .forEach(drawSnakeSegment);
 
     const danger = clamp01(((f.coverage || 0) - 0.62) / 0.26);
@@ -533,11 +545,13 @@ const RENDERERS = {
     ctx.restore();
 
     const activeLane = active >= 3 && active <= 5 ? active - 3 : (gates[active]?.lane ?? 1);
-    bullets.concat([{lane: activeLane}]).slice(-3).forEach((b, i) => {
-      const x = laneX(b.lane || 0);
+    const defaultBulletX = gates[active]?.x ?? ((82 + activeLane * 112) / 390);
+    bullets.concat([{lane: activeLane, x: defaultBulletX}]).slice(-3).forEach((b, i) => {
+      const x = Number.isFinite(b.x) ? X(b.x * 390) : laneX(b.lane || 0);
       const pulse = (now * 4 + i * .28) % 1;
       const y0 = playerY - S(42);
-      const y1 = Y(130 + (f.coverage || 0) * 210);
+      const hitY = Number.isFinite(b.hitY) ? b.hitY : Number.isFinite(b.aimY) ? b.aimY : null;
+      const y1 = hitY == null ? Y(130 + (f.coverage || 0) * 210) : Y(hitY * 693);
       const by = y0 + (y1 - y0) * pulse;
       ctx.save();
       ctx.strokeStyle = "rgba(255,245,120,.55)";
@@ -546,6 +560,11 @@ const RENDERERS = {
       ctx.fillStyle = "#fff86b";
       ctx.shadowColor = "#fff86b"; ctx.shadowBlur = S(10);
       ctx.beginPath(); ctx.arc(x, by, S(5), 0, Math.PI * 2); ctx.fill();
+      if (Number.isFinite(b.hitY)) {
+        ctx.strokeStyle = "rgba(255,255,255,.72)";
+        ctx.lineWidth = S(2);
+        ctx.beginPath(); ctx.arc(x, y1, S(10), 0, Math.PI * 2); ctx.stroke();
+      }
       ctx.restore();
     });
 
