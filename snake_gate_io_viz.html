@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Snake Gate — DQN 输入/输出可视化</title>
+<style>
+  :root { --bg: #0f1117; --card: #1a1d27; --border: #2a2d3a; --text: #c9d1d9; --dim: #6e7681; --accent: #58a6ff; --green: #3fb950; --yellow: #d2991d; --red: #f85149; --purple: #a371f7; }
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); padding: 24px; line-height: 1.5; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: var(--dim); font-size: 13px; margin-bottom: 20px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .card h3 { font-size: 14px; color: var(--accent); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+  .card h3 .badge { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--accent); color: #000; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; color: var(--dim); font-weight: 500; padding: 3px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 3px 8px; border-bottom: 1px solid rgb(42,45,58,0.4); }
+  .idx { color: var(--dim); font-variant-numeric: tabular-nums; }
+  .bar-wrap { width: 60px; height: 6px; background: var(--border); border-radius: 3px; display: inline-block; vertical-align: middle; margin-left: 4px; }
+  .bar { height: 100%; border-radius: 3px; transition: width 0.3s; }
+  .bar.green { background: var(--green); }
+  .bar.yellow { background: var(--yellow); }
+  .bar.red { background: var(--red); }
+  .bar.purple { background: var(--purple); }
+  .bar.blue { background: var(--accent); }
+  .section-header td { color: var(--accent); font-weight: 600; padding-top: 8px; border-bottom: 2px solid var(--border); }
+  .action-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-top: 8px; }
+  .action-cell { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 8px; text-align: center; transition: all 0.2s; }
+  .action-cell:hover { border-color: var(--accent); }
+  .action-cell .act-id { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+  .action-cell .act-label { font-size: 10px; color: var(--dim); }
+  .action-cell .act-detail { font-size: 10px; margin-top: 2px; }
+  .action-cell.gate { border-left: 3px solid var(--purple); }
+  .action-cell.direct { border-left: 3px solid var(--yellow); }
+  .action-cell.smart { border-left: 3px solid var(--green); }
+  .action-cell .act-id.gate-color { color: var(--purple); }
+  .action-cell .act-id.direct-color { color: var(--yellow); }
+  .action-cell .act-id.smart-color { color: var(--green); }
+  .flow { margin-top: 12px; padding: 10px; background: var(--bg); border-radius: 6px; font-size: 11px; }
+  .flow span { color: var(--dim); }
+  .flow .hl { color: var(--accent); }
+  .flow .hl2 { color: var(--green); }
+  .legend { display: flex; gap: 16px; font-size: 11px; color: var(--dim); margin-top: 8px; }
+  .legend span { display: flex; align-items: center; gap: 4px; }
+  .legend .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .full-width { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+
+<h1>Snake Gate — DQN 输入 / 输出</h1>
+<p class="sub">obs_dim=34 → MLP[128→128→7] → Q 值 → argmax → 动作 (7 选 1)</p>
+
+<div class="grid">
+  <!-- INPUT COLUMN -->
+  <div class="card" style="grid-row: 1 / 4;">
+    <h3>📥 输入 — 观测向量 (34 维 float32)<span class="badge">input</span></h3>
+    <table>
+      <tr class="section-header"><td colspan="4">全局特征 (7 维)</td></tr>
+      <tr><td class="idx">0</td><td>log₁₊(attack)/10</td><td>0.26</td><td><span class="bar-wrap"><span class="bar green" style="width:26%"></span></span></td></tr>
+      <tr><td class="idx">1</td><td>log₁₊(fire_rate)/5</td><td>0.14</td><td><span class="bar-wrap"><span class="bar green" style="width:14%"></span></span></td></tr>
+      <tr><td class="idx">2</td><td>log₁₊(dps)/10</td><td>0.26</td><td><span class="bar-wrap"><span class="bar green" style="width:26%"></span></span></td></tr>
+      <tr><td class="idx">3</td><td>coverage</td><td>0.18</td><td><span class="bar-wrap"><span class="bar red" style="width:18%"></span></span></td></tr>
+      <tr><td class="idx">4</td><td>kills / target_kills</td><td>0.00</td><td><span class="bar-wrap"><span class="bar blue" style="width:0%"></span></span></td></tr>
+      <tr><td class="idx">5</td><td>1 − steps/max_steps</td><td>1.00</td><td><span class="bar-wrap"><span class="bar blue" style="width:100%"></span></span></td></tr>
+      <tr><td class="idx">6</td><td>active_segments / target</td><td>0.02</td><td><span class="bar-wrap"><span class="bar purple" style="width:2%"></span></span></td></tr>
+
+      <tr class="section-header"><td colspan="4">Gate 0 — 射速×, lane 0, x=0.22 (6 维)</td></tr>
+      <tr><td class="idx">7</td><td>gate_type / 2</td><td>1.00</td><td>FIRE_RATE_MULT=2 → /2=1.0</td></tr>
+      <tr><td class="idx">8</td><td>level / max_level</td><td>0.00</td><td><span class="bar-wrap"><span class="bar purple" style="width:0%"></span></span></td></tr>
+      <tr><td class="idx">9</td><td>min(1, remaining_cost/500)</td><td>0.10</td><td><span class="bar-wrap"><span class="bar purple" style="width:10%"></span></span></td></tr>
+      <tr><td class="idx">10</td><td>min(1, reward/120)</td><td>0.01</td><td><span class="bar-wrap"><span class="bar purple" style="width:1%"></span></span></td></tr>
+      <tr><td class="idx">11</td><td>min(1, ROI/1.0)</td><td>0.09</td><td><span class="bar-wrap"><span class="bar purple" style="width:9%"></span></span></td></tr>
+      <tr><td class="idx">12</td><td>gate_x</td><td>0.22</td><td><span class="bar-wrap"><span class="bar purple" style="width:22%"></span></span></td></tr>
+
+      <tr class="section-header"><td colspan="4">Gate 1 — 攻击+, lane 1, 移动门 (6 维)</td></tr>
+      <tr><td class="idx">13</td><td>gate_type / 2</td><td>0.00</td><td>ATTACK_ADD=0 → /2=0.0</td></tr>
+      <tr><td class="idx">14</td><td>level / max_level</td><td>0.00</td><td><span class="bar-wrap"><span class="bar purple" style="width:0%"></span></span></td></tr>
+      <tr><td class="idx">15</td><td>min(1, remaining_cost/500)</td><td>0.08</td><td><span class="bar-wrap"><span class="bar purple" style="width:8%"></span></span></td></tr>
+      <tr><td class="idx">16</td><td>min(1, reward/120)</td><td>0.20</td><td><span class="bar-wrap"><span class="bar purple" style="width:20%"></span></span></td></tr>
+      <tr><td class="idx">17</td><td>min(1, ROI/1.0)</td><td>0.57</td><td><span class="bar-wrap"><span class="bar purple" style="width:57%"></span></span></td></tr>
+      <tr><td class="idx">18</td><td>gate_x</td><td>0.50</td><td><span class="bar-wrap"><span class="bar purple" style="width:50%"></span></span></td></tr>
+
+      <tr class="section-header"><td colspan="4">Gate 2 — 攻击×, lane 2, x=0.78 (6 维)</td></tr>
+      <tr><td class="idx">19</td><td>gate_type / 2</td><td>0.50</td><td>ATTACK_MULT=1 → /2=0.5</td></tr>
+      <tr><td class="idx">20</td><td>level / max_level</td><td>0.00</td><td><span class="bar-wrap"><span class="bar purple" style="width:0%"></span></span></td></tr>
+      <tr><td class="idx">21</td><td>min(1, remaining_cost/500)</td><td>0.14</td><td><span class="bar-wrap"><span class="bar purple" style="width:14%"></span></span></td></tr>
+      <tr><td class="idx">22</td><td>min(1, reward/120)</td><td>0.01</td><td><span class="bar-wrap"><span class="bar purple" style="width:1%"></span></span></td></tr>
+      <tr><td class="idx">23</td><td>min(1, ROI/1.0)</td><td>0.08</td><td><span class="bar-wrap"><span class="bar purple" style="width:8%"></span></span></td></tr>
+      <tr><td class="idx">24</td><td>gate_x</td><td>0.78</td><td><span class="bar-wrap"><span class="bar purple" style="width:78%"></span></span></td></tr>
+
+      <tr class="section-header"><td colspan="4">Lane 0 状态 (3 维)</td></tr>
+      <tr><td class="idx">25</td><td>front (最前端蛇段 depth)</td><td>0.86</td><td><span class="bar-wrap"><span class="bar red" style="width:86%"></span></span></td></tr>
+      <tr><td class="idx">26</td><td>hp_ratio (∑hp/∑max_hp)</td><td>1.00</td><td><span class="bar-wrap"><span class="bar yellow" style="width:100%"></span></span></td></tr>
+      <tr><td class="idx">27</td><td>has_chest</td><td>0.00</td><td>无宝箱</td></tr>
+
+      <tr class="section-header"><td colspan="4">Lane 1 状态 (3 维)</td></tr>
+      <tr><td class="idx">28</td><td>front</td><td>0.86</td><td><span class="bar-wrap"><span class="bar red" style="width:86%"></span></span></td></tr>
+      <tr><td class="idx">29</td><td>hp_ratio</td><td>1.00</td><td><span class="bar-wrap"><span class="bar yellow" style="width:100%"></span></span></td></tr>
+      <tr><td class="idx">30</td><td>has_chest</td><td>0.00</td><td>无宝箱</td></tr>
+
+      <tr class="section-header"><td colspan="4">Lane 2 状态 (3 维)</td></tr>
+      <tr><td class="idx">31</td><td>front</td><td>0.00</td><td><span class="bar-wrap"><span class="bar green" style="width:0%"></span></span></td></tr>
+      <tr><td class="idx">32</td><td>hp_ratio</td><td>0.00</td><td>无蛇段 → 0</td></tr>
+      <tr><td class="idx">33</td><td>has_chest</td><td>0.00</td><td>无宝箱</td></tr>
+    </table>
+  </div>
+
+  <!-- OUTPUT COLUMN -->
+  <div class="card">
+    <h3>📤 输出 — Q 值 → 动作<span class="badge">output</span></h3>
+    <div class="action-grid">
+      <div class="action-cell gate">
+        <div class="act-id gate-color">0</div>
+        <div class="act-label">打 Gate 0</div>
+        <div class="act-detail">射速×门<br>lane 0 · x=0.22</div>
+      </div>
+      <div class="action-cell gate">
+        <div class="act-id gate-color">1</div>
+        <div class="act-label">打 Gate 1</div>
+        <div class="act-detail">攻击+门<br>lane 1 · 🔴移动</div>
+      </div>
+      <div class="action-cell gate">
+        <div class="act-id gate-color">2</div>
+        <div class="act-label">打 Gate 2</div>
+        <div class="act-detail">攻击×门<br>lane 2 · x=0.78</div>
+      </div>
+      <div class="action-cell direct">
+        <div class="act-id direct-color">3</div>
+        <div class="act-label">直射 lane 0</div>
+        <div class="act-detail">不穿门<br>直接打蛇段</div>
+      </div>
+      <div class="action-cell direct">
+        <div class="act-id direct-color">4</div>
+        <div class="act-label">直射 lane 1</div>
+        <div class="act-detail">不穿门<br>直接打蛇段</div>
+      </div>
+      <div class="action-cell direct">
+        <div class="act-id direct-color">5</div>
+        <div class="act-label">直射 lane 2</div>
+        <div class="act-detail">不穿门<br>直接打蛇段</div>
+      </div>
+      <div class="action-cell smart">
+        <div class="act-id smart-color">6</div>
+        <div class="act-label">智能射击</div>
+        <div class="act-detail">🎁宝箱优先<br>否则×威胁</div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <span><span class="dot" style="background:var(--purple)"></span> 瞄准门(充能)</span>
+      <span><span class="dot" style="background:var(--yellow)"></span> 直射蛇段</span>
+      <span><span class="dot" style="background:var(--green)"></span> 自动寻的</span>
+    </div>
+  </div>
+
+<!-- REWARD & SANKEY -->
+<div class="card">
+  <h3>🎯 每步奖励结构</h3>
+  <table>
+    <tr><td style="width:80px">基础</td><td><code>+0.05 × dps</code></td><td style="color:var(--dim)">≈ 0.6/步 (初始 12dps)</td></tr>
+    <tr><td>打中门</td><td><code>+0.1</code></td><td style="color:var(--dim)">充能减 1</td></tr>
+    <tr><td>门升级</td><td><code>+18 + 0.02×Δdps</code></td><td style="color:var(--dim)">大幅奖励</td></tr>
+    <tr><td>打中蛇</td><td>已含在基础中</td><td style="color:var(--dim)">子弹路径上没门时触发</td></tr>
+    <tr><td>击杀蛇段</td><td><code>+shred</code> (击杀奖励)</td><td style="color:var(--dim)">含 chest bonus</td></tr>
+    <tr style="color:var(--red)"><td>空枪</td><td><code>−0.4</code></td><td style="color:var(--dim)">没门没蛇</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h3>⚙️ DQN 超参</h3>
+  <table>
+    <tr><td style="width:120px">网络</td><td>MLP: 34 → 128 → 128 → 7 Q 值</td></tr>
+    <tr><td>激活</td><td>Tanh</td></tr>
+    <tr><td>优化</td><td>Adam, lr=3e-4, grad clip 10.0</td></tr>
+    <tr><td>γ / batch</td><td>0.99 / 128</td></tr>
+    <tr><td>buffer</td><td>100k (ring buffer)</td></tr>
+    <tr><td>warmup / target sync</td><td>2k / 1k steps</td></tr>
+    <trtd style="color:var(--accent)">ε 衰减</td><td>1.0 → 0.02, 线性 150k 步 <span style="color:var(--dim)">(修复后)</span></td></tr>
+  </table>
+</div>
+
+</div><!-- grid -->
+
+</body>
+</html>
