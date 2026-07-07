@@ -69,6 +69,7 @@ class GateState:
 @dataclass
 class SnakeSegment:
     id: int
+    front_order: int
     lane: int
     row: int
     path_x: float
@@ -230,6 +231,7 @@ class SnakeGateEnv(BaseEnv):
         rows = max(1, ceil(total / self.config.lanes))
         for idx in range(total):
             row = idx // self.config.lanes
+            display_row = rows - 1 - row
             col = idx % self.config.lanes
             lane = col if row % 2 == 0 else self.config.lanes - 1 - col
             progress = idx / max(1, total - 1)
@@ -237,11 +239,12 @@ class SnakeGateEnv(BaseEnv):
             hp_scale *= 1.0 + 0.28 * progress * progress
             hp = self.config.segment_hp * hp_scale
             chest = idx > 0 and idx % self.config.chest_every == 0
-            depth = 0.08 + 0.78 * (row / max(1, rows - 1))
+            depth = 0.08 + 0.78 * (display_row / max(1, rows - 1))
             path_x = (lane + 0.5) / self.config.lanes
-            path_y = (row + 0.5) / rows
+            path_y = (display_row + 0.5) / rows
             body.append(
                 SnakeSegment(
+                    idx,
                     idx,
                     lane,
                     row,
@@ -401,8 +404,8 @@ class SnakeGateEnv(BaseEnv):
         if chest_priority:
             chests = [s for s in candidates if s.chest]
             if chests:
-                return max(chests, key=lambda s: s.depth)
-        return max(candidates, key=lambda s: s.depth)
+                return max(chests, key=lambda s: s.front_order)
+        return max(candidates, key=lambda s: s.front_order)
 
     def _lane_for_action(self, action: int) -> int:
         if 0 <= action < len(self.gates):
@@ -421,7 +424,7 @@ class SnakeGateEnv(BaseEnv):
         ]
         if not chests:
             return None
-        return max(chests, key=lambda s: s.depth).lane
+        return max(chests, key=lambda s: s.front_order).lane
 
     def _lane_threat(self, lane: int) -> float:
         return sum(
@@ -502,6 +505,7 @@ class SnakeGateEnv(BaseEnv):
                 "snakeSegments": [
                     {
                         "id": s.id,
+                        "frontOrder": s.front_order,
                         "lane": s.lane,
                         "row": s.row,
                         "pathX": round(s.path_x, 3),

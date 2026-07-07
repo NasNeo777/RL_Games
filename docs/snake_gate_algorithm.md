@@ -6,15 +6,18 @@
 - `player.attack`: 单发攻击强度。
 - `player.fire_rate`: 发射频率。
 - `player.dps`: `attack * fire_rate`，每秒有效输出。
-- `snake_segments`: 大蛇身体分段，每段包含 `lane / hp / max_hp / depth / chest`。
+- `snake_segments`: 大蛇完整身体分段，每段包含 `lane / row / path_x / path_y / hp / max_hp / depth / status / chest`。
 - `gates`: 门状态，每个门包含 `type / lane / x / y / moving / level / cost / reward`。
 - `action`: 智能体动作，选择打哪个门、哪条路，或宝箱优先。
-- `kills`: 已消灭蛇身段数，达到 `target_kills` 判胜。
+- `kills`: 已打死蛇身段数；只用于进度和奖励，不再单独判胜。
+- `pending / entered / alive / dead / cleared`: 蛇身生命周期。所有段按蛇形网格路径入场，死亡后短暂保留，再清除。
 
 ## 2. 变量关系
 
 - 大蛇持续下压：`coverage += snake_speed * dt`。
-- 新蛇身出现会增加屏幕压力：`coverage += snake_push_per_segment`。
+- 蛇身按蛇形路径逐段入场：第一行左到右，下一行右到左，直到完整身体全部出现。
+- 新蛇身出现会增加屏幕压力：`coverage += snake_push_per_segment * segment_pressure`。
+- 后段蛇身 `hp` 和 `segment_pressure` 更高，入场节奏也随进度和覆盖压力提升。
 - 击杀蛇身会减轻压力：`coverage -= snake_retreat_on_kill`。
 - 子弹穿门会消耗门成本：`gate.cost -= player.dps * dt`。
 - 门被打穿后升级，下一次成本和奖励同时增长。
@@ -55,7 +58,7 @@ r = -0.02 - 0.35 * coverage
 终止条件：
 
 ```text
-success: kills >= target_kills
+success: no pending segments and every body segment is dead or cleared
 failure: coverage >= fail_coverage
 truncate: steps >= max_steps
 ```

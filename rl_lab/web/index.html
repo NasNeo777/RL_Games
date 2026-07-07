@@ -423,11 +423,16 @@ const RENDERERS = {
 
     const laneX = lane => X(82 + lane * 112);
     const drawSnakeSegment = seg => {
-      const cx = laneX(seg.lane || 0);
-      const cy = Y(105 + (seg.depth || 0) * 330 + (f.coverage || 0) * 165);
+      const hasPath = Number.isFinite(seg.pathX) && Number.isFinite(seg.pathY);
+      const cx = hasPath ? X(38 + seg.pathX * 314) : laneX(seg.lane || 0);
+      const cy = hasPath ? Y(70 + seg.pathY * 254 + (f.coverage || 0) * 42) : Y(105 + (seg.depth || 0) * 330 + (f.coverage || 0) * 165);
       const hpRatio = clamp01((seg.hp || 0) / Math.max(1, seg.maxHp || 1));
-      const w = X(86 + 26 * (seg.depth || 0.1));
-      const h = Y(42 + 10 * (seg.depth || 0.1));
+      const dead = seg.status === "dead" || hpRatio <= 0;
+      const entering = seg.status === "entered";
+      const w = hasPath ? X(82) : X(86 + 26 * (seg.depth || 0.1));
+      const h = hasPath ? Y(42) : Y(42 + 10 * (seg.depth || 0.1));
+      ctx.save();
+      ctx.globalAlpha = dead ? 0.45 : entering ? 0.72 : 1;
       drawRock(cx, cy, w, h, Math.round(seg.hp || 0), null, seg.hit, hpRatio <= 0);
       ctx.save();
       ctx.fillStyle = "rgba(0,0,0,.36)";
@@ -437,7 +442,8 @@ const RENDERERS = {
       ctx.fillStyle = hp;
       round(cx - w * .38, cy + h * .33, w * .76 * hpRatio, S(5), S(3)); ctx.fill();
       ctx.restore();
-      if (seg.chest) drawChest(cx + w * .22, cy - h * .24, false, seg.hit, seg.hp || 0);
+      if (seg.chest) drawChest(cx + w * .22, cy - h * .24, !!seg.chestOpened || dead, seg.hit, seg.hp || 0);
+      ctx.restore();
     };
 
     ctx.save();
@@ -447,6 +453,7 @@ const RENDERERS = {
     textStroke("Snake Gate", X(28), Y(39), 18, "#eef8ff", "rgba(18,34,45,.75)", 900, 2);
     textStroke(`击破 ${f.kills || 0}/${f.targetKills || 18}`, X(28), Y(61), 14, "#ffe96a", "rgba(18,34,45,.78)", 850, 2);
     ctx.textAlign = "right";
+    textStroke(`待入场 ${f.pendingSegments ?? 0}`, X(360), Y(22), 12, "#cfe8f2", "rgba(18,34,45,.78)", 800, 2);
     textStroke(`攻击 ${f.attack || 0}`, X(360), Y(38), 15, "#ffffff", "rgba(18,34,45,.78)", 850, 2);
     textStroke(`攻速 ${f.fireRate || 0}`, X(360), Y(60), 15, "#ffffff", "rgba(18,34,45,.78)", 850, 2);
     ctx.textAlign = "left";
@@ -462,12 +469,12 @@ const RENDERERS = {
     }
     ctx.restore();
 
-    const coverBottom = Y(92 + clamp01(f.coverage || 0) * 505);
-    const cover = ctx.createLinearGradient(0, Y(96), 0, coverBottom);
+    const coverBottom = Y(54 + clamp01(f.coverage || 0) * 318);
+    const cover = ctx.createLinearGradient(0, Y(42), 0, coverBottom);
     cover.addColorStop(0, "rgba(35,45,55,.35)");
     cover.addColorStop(1, "rgba(20,30,38,.18)");
     ctx.fillStyle = cover;
-    ctx.fillRect(0, Y(100), W, Math.max(0, coverBottom - Y(100)));
+    ctx.fillRect(X(14), Y(76), X(362), Math.max(0, coverBottom - Y(76)));
 
     ctx.save();
     ctx.globalAlpha = 0.9;
@@ -483,7 +490,10 @@ const RENDERERS = {
     ctx.lineWidth = S(30);
     ctx.stroke();
     ctx.restore();
-    segments.slice().sort((a, b) => (a.depth || 0) - (b.depth || 0)).forEach(drawSnakeSegment);
+    segments.slice()
+      .filter(seg => seg.status !== "pending")
+      .sort((a, b) => (a.frontOrder ?? a.id ?? 0) - (b.frontOrder ?? b.id ?? 0))
+      .forEach(drawSnakeSegment);
 
     const danger = clamp01(((f.coverage || 0) - 0.62) / 0.26);
     if (danger > 0) {
