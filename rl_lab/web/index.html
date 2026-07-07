@@ -422,17 +422,22 @@ const RENDERERS = {
     };
 
     const laneX = lane => X(82 + lane * 112);
-    const drawSnakeSegment = seg => {
+    const segmentCenter = seg => {
       const hasPath = Number.isFinite(seg.pathX) && Number.isFinite(seg.pathY);
       const hasRender = Number.isFinite(seg.renderX) && Number.isFinite(seg.renderY);
       const cx = hasRender ? X(seg.renderX * 390) : hasPath ? X(38 + seg.pathX * 314) : laneX(seg.lane || 0);
       const cy = hasRender ? Y(seg.renderY * 693) : hasPath ? Y(70 + seg.pathY * 254 + (f.coverage || 0) * 42) : Y(105 + (seg.depth || 0) * 330 + (f.coverage || 0) * 165);
-      const hpRatio = clamp01((seg.hp || 0) / Math.max(1, seg.maxHp || 1));
-      const dead = seg.status === "dead" || hpRatio <= 0;
       const entering = seg.status === "entered";
       const entry = clamp01(seg.entryProgress ?? (entering ? 0.45 : 1));
       const w = Number.isFinite(seg.collisionW) ? X(seg.collisionW * 390) : hasPath ? X(82) : X(86 + 26 * (seg.depth || 0.1));
       const h = Number.isFinite(seg.collisionH) ? Y(seg.collisionH * 693) : hasPath ? Y(42) : Y(42 + 10 * (seg.depth || 0.1));
+      return { cx, cy, w, h, entry };
+    };
+    const drawSnakeSegment = seg => {
+      const { cx, cy, w, h, entry } = segmentCenter(seg);
+      const hpRatio = clamp01((seg.hp || 0) / Math.max(1, seg.maxHp || 1));
+      const dead = seg.status === "dead" || hpRatio <= 0;
+      const entering = seg.status === "entered";
       ctx.save();
       ctx.globalAlpha = dead ? 0.45 : entering ? 0.42 + 0.58 * entry : 1;
       drawRock(cx, cy, w, h, Math.round(seg.hp || 0), null, seg.hit, hpRatio <= 0);
@@ -502,8 +507,36 @@ const RENDERERS = {
     ctx.lineWidth = S(30);
     ctx.stroke();
     ctx.restore();
-    segments.slice()
-      .filter(seg => seg.status !== "pending")
+
+    const visibleSegments = segments.slice().filter(seg => seg.status !== "pending");
+    const snakeLine = visibleSegments
+      .filter(seg => seg.status !== "dead")
+      .sort((a, b) => (a.frontOrder ?? a.id ?? 0) - (b.frontOrder ?? b.id ?? 0))
+      .map(segmentCenter)
+      .filter(p => p.entry > 0);
+    if (snakeLine.length > 1) {
+      ctx.save();
+      ctx.globalAlpha = 0.64;
+      ctx.strokeStyle = "rgba(83,103,107,.92)";
+      ctx.lineWidth = S(52);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(snakeLine[0].cx, snakeLine[0].cy);
+      for (let i = 1; i < snakeLine.length; i++) {
+        const prev = snakeLine[i - 1], cur = snakeLine[i];
+        ctx.quadraticCurveTo(prev.cx, prev.cy, (prev.cx + cur.cx) / 2, (prev.cy + cur.cy) / 2);
+      }
+      const tail = snakeLine[snakeLine.length - 1];
+      ctx.lineTo(tail.cx, tail.cy);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(178,194,187,.82)";
+      ctx.lineWidth = S(36);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    visibleSegments
       .sort((a, b) => (a.renderY ?? a.pathY ?? 0) - (b.renderY ?? b.pathY ?? 0))
       .forEach(drawSnakeSegment);
 

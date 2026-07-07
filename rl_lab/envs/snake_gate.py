@@ -97,10 +97,18 @@ class LevelConfig:
     dead_clear_delay: float = 0.45
     fail_coverage: float = 0.88
     start_coverage: float = 0.18
+    initial_entry_distance: float = 1.2
     segment_entry_duration: float = 0.85
     entry_start_y: float = -0.08
     bullet_start_y: float = 0.83
     bullet_end_y: float = -0.08
+    snake_body_spacing: float = 0.72
+    snake_track_left: float = 0.14
+    snake_track_right: float = 0.86
+    snake_track_row_gap: float = 0.105
+    snake_track_straight_distance: float = 4.2
+    snake_track_turn_distance: float = 0.9
+    snake_track_turn_bulge: float = 0.045
     target_kills: int = 18
     segment_hp: float = 95.0
     segment_hp_growth: float = 1.18
@@ -151,13 +159,12 @@ class SnakeGateEnv(BaseEnv):
         self.gates = self._make_gates()
         self.snake_segments = self._make_snake_body()
         self.next_entry_index = 0
-        self.entry_meter = 0.0
+        self.entry_meter = self.config.initial_entry_distance
         self.kills = 0
         self.cleared = 0
         self.last_bullets = []
         self.last_target_id = None
-        for _ in range(min(self.config.lanes * 2, len(self.snake_segments))):
-            self._enter_next_segment()
+        self._sync_snake_entry_states()
         self.frames = []
         if self.record:
             self._record_frame(event="reset", action=None)
@@ -265,41 +272,29 @@ class SnakeGateEnv(BaseEnv):
             )
         return body
 
-    def _enter_next_segment(self) -> bool:
-        if self.next_entry_index >= len(self.snake_segments):
-            return False
-        segment = self.snake_segments[self.next_entry_index]
-        segment.status = "entered"
-        segment.status_age = 0.0
-        segment.entry_progress = 0.0
-        self.next_entry_index += 1
-        self.coverage = min(
-            self.config.fail_coverage,
-            self.coverage
-            + self.config.snake_push_per_segment * self._segment_pressure(segment),
-        )
-        return True
-
     def _advance_snake_lifecycle(self) -> None:
         for segment in self.snake_segments:
-            if segment.status in {"entered", "alive", "dead"}:
+            if segment.status == "dead":
                 segment.status_age += self.config.dt
-            if segment.status == "entered":
-                segment.entry_progress = min(
-                    1.0,
-                    segment.status_age
-                    / max(self.config.dt, self.config.segment_entry_duration),
-                )
-                if segment.entry_progress >= 1.0:
-                    segment.status = "alive"
-                    segment.status_age = 0.0
-            elif (
+            if (
                 segment.status == "dead"
                 and segment.status_age >= self.config.dead_clear_delay
             ):
                 segment.status = "cleared"
                 segment.status_age = 0.0
                 self.cleared += 1
+
+        previous_entry = self.entry_meter
+        if self.entry_meter < self._tail_fully_entered_distance():
+            progress = self.entry_meter / max(1.0, len(self.snake_segments) - 1)
+            rate = 0.72 + 0.76 * progress + 0.36 * self.coverage
+            self.entry_meter = min(
+                self._tail_fully_entered_distance(),
+                self.entry_meter + rate * self.config.dt,
+            )
+            self._apply_continuous_entry_pressure(previous_entry, self.entry_meter)
+
+        self._sync_snake_entry_states()
 
         active_pressure = sum(
             self._segment_pressure(s)
@@ -312,16 +307,152 @@ class SnakeGateEnv(BaseEnv):
             + self.config.snake_speed * self.config.dt * (1.0 + 2.4 * active_pressure),
         )
 
-        if self.next_entry_index < len(self.snake_segments):
-            progress = self.next_entry_index / max(1, len(self.snake_segments) - 1)
-            rate = 0.72 + 0.76 * progress + 0.36 * self.coverage
-            self.entry_meter += rate * self.config.dt
-            while self.entry_meter >= 1.0 and self._enter_next_segment():
-                self.entry_meter -= 1.0
-
     def _segment_pressure(self, segment: SnakeSegment) -> float:
         progress = segment.id / max(1, self.config.target_kills - 1)
         return 1.0 + 0.8 * progress
+
+    def _apply_continuous_entry_pressure(self, previous: float, current: float) -> None:
+        all_started = self._tail_start_distance()
+        previous = min(previous, all_started)
+        current = min(current, all_started)
+        delta = max(0.0, current - previous)
+        if delta <= 0.0:
+            return
+        idx = max(
+            0,
+            min(
+                len(self.snake_segments) - 1,
+                int(current / max(0.1, self.config.snake_body_spacing)),
+            ),
+        )
+        segment = self._segment_at_body_slot(idx)
+        if segment is None:
+            return
+        self.coverage = min(
+            self.config.fail_coverage,
+            self.coverage
+            + self.config.snake_push_per_segment
+            * delta
+            * self._segment_pressure(segment),
+        )
+
+    def _body_segments(self) -> list[SnakeSegment]:
+        return [
+            s
+            for s in sorted(self.snake_segments, key=lambda x: x.front_order)
+            if s.status != "cleared"
+        ]
+
+    def _segment_at_body_slot(self, slot: int) -> SnakeSegment | None:
+        body = self._body_segments()
+        if not body:
+            return None
+        return min(body, key=lambda segment: abs(self._segment_body_slot(segment) - slot))
+
+    def _segment_body_slot(self, segment: SnakeSegment) -> int:
+        slot = 0
+        for candidate in sorted(self.snake_segments, key=lambda x: x.front_order):
+            if candidate is segment:
+                break
+            slot += 1
+        cleared_after = sum(
+            1
+            for candidate in self.snake_segments
+            if candidate.status == "cleared"
+            and candidate.front_order > segment.front_order
+        )
+        return slot + cleared_after
+
+    def _slot_start_distance(self, slot: int) -> float:
+        return slot * self.config.snake_body_spacing
+
+    def _tail_start_distance(self) -> float:
+        body = self._body_segments()
+        if not body:
+            return 0.0
+        return self._slot_start_distance(
+            max(self._segment_body_slot(segment) for segment in body)
+        )
+
+    def _tail_fully_entered_distance(self) -> float:
+        return self._tail_start_distance() + self.config.segment_entry_duration
+
+    def _segment_path_distance(self, segment: SnakeSegment) -> float:
+        return self.entry_meter - self._slot_start_distance(
+            self._segment_body_slot(segment)
+        )
+
+    def _entry_progress_from_distance(self, distance: float) -> float:
+        return max(
+            0.0,
+            min(
+                1.0,
+                distance / max(self.config.dt, self.config.segment_entry_duration),
+            ),
+        )
+
+    def _snake_path_position(self, distance: float) -> tuple[float, float]:
+        distance = max(0.0, distance)
+        straight = max(0.1, self.config.snake_track_straight_distance)
+        turn = max(0.1, self.config.snake_track_turn_distance)
+        cycle = straight + turn
+        row = int(distance / cycle)
+        offset = distance - row * cycle
+        left = self.config.snake_track_left
+        right = self.config.snake_track_right
+        row_y = (
+            self.config.entry_start_y
+            + self.coverage * 0.12
+            + row * self.config.snake_track_row_gap
+        )
+
+        left_to_right = row % 2 == 0
+        if offset <= straight:
+            u = offset / straight
+            if left_to_right:
+                x = left + (right - left) * u
+            else:
+                x = right - (right - left) * u
+            y = row_y
+        else:
+            u = self._smoothstep((offset - straight) / turn)
+            if left_to_right:
+                x = right + self.config.snake_track_turn_bulge * (1.0 - abs(2.0 * u - 1.0))
+            else:
+                x = left - self.config.snake_track_turn_bulge * (1.0 - abs(2.0 * u - 1.0))
+            y = row_y + self.config.snake_track_row_gap * u
+
+        return max(0.08, min(0.92, x)), y
+
+    def _sync_snake_entry_states(self) -> None:
+        started = 0
+        for segment in self.snake_segments:
+            if segment.status in {"dead", "cleared"}:
+                started += 1
+                continue
+
+            distance = self._segment_path_distance(segment)
+            progress = self._entry_progress_from_distance(distance)
+            segment.entry_progress = progress
+
+            if distance <= 0.0:
+                segment.status = "pending"
+                segment.status_age = 0.0
+                continue
+
+            started += 1
+            before = segment.status
+            segment.status = "alive" if progress >= 1.0 else "entered"
+            segment.status_age = progress * self.config.segment_entry_duration
+
+            x, _ = self._snake_path_position(distance)
+            segment.lane = max(
+                0, min(self.config.lanes - 1, int(x * self.config.lanes))
+            )
+            if before == "pending":
+                segment.status_age = 0.0
+
+        self.next_entry_index = min(len(self.snake_segments), started)
 
     def _smoothstep(self, value: float) -> float:
         value = max(0.0, min(1.0, value))
@@ -337,13 +468,9 @@ class SnakeGateEnv(BaseEnv):
         return max(0.0, min(1.0, segment.entry_progress))
 
     def _segment_render_geometry(self, segment: SnakeSegment) -> dict[str, float]:
+        distance = self._segment_path_distance(segment)
         progress = self._segment_entry_progress(segment)
-        eased = self._smoothstep(progress)
-        target_x = (38.0 + segment.path_x * 314.0) / 390.0
-        target_y = (70.0 + segment.path_y * 254.0 + self.coverage * 42.0) / 693.0
-        swim = 0.012 * sin(tau * (0.42 * self.t + 0.13 * segment.front_order)) * eased
-        x = max(0.06, min(0.94, target_x + swim))
-        y = self.config.entry_start_y + (target_y - self.config.entry_start_y) * eased
+        x, y = self._snake_path_position(distance)
         return {
             "x": x,
             "y": y,
@@ -403,9 +530,7 @@ class SnakeGateEnv(BaseEnv):
         return sum(1 for s in self.snake_segments if s.status in {"entered", "alive"})
 
     def _snake_defeated(self) -> bool:
-        return self.next_entry_index >= len(self.snake_segments) and all(
-            s.status in {"dead", "cleared"} for s in self.snake_segments
-        )
+        return all(s.status in {"dead", "cleared"} for s in self.snake_segments)
 
     def _fire(self, action: int):
         lane = self._lane_for_action(action)

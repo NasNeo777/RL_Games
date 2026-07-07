@@ -10,13 +10,14 @@
 - `gates`: 门状态，每个门包含 `type / lane / x / y / moving / level / cost / reward`。
 - `action`: 智能体动作，选择打哪个门、哪条路，或宝箱优先。
 - `kills`: 已打死蛇身段数；只用于进度和奖励，不再单独判胜。
-- `pending / entered / alive / dead / cleared`: 蛇身生命周期。所有段按蛇形网格路径入场，死亡后短暂保留，再清除。
+- `pending / entered / alive / dead / cleared`: 蛇身生命周期。所有段是同一条连续折返蛇身上的采样点，死亡后短暂保留，再清除并释放身体槽位。
 
 ## 2. 变量关系
 
 - 大蛇持续下压：`coverage += snake_speed * dt`。
-- 蛇身按蛇形路径逐段入场：每块先从屏幕上方进入，再按入场进度游到自己的路径位置；第一行左到右，下一行右到左，直到完整身体全部出现。
-- 新蛇身出现会增加屏幕压力：`coverage += snake_push_per_segment * segment_pressure`。
+- 大蛇按连续距离游入：`entry_meter` 每帧只增加一小段，蛇身块按固定间距挂在横向折返轨迹上，从屏幕上方连续露出。
+- 被击破的身体块清除后不再占位，蛇头一侧的身体会往后缩来补空位，尾巴一侧不会主动前顶。
+- 蛇身连续游入会增加屏幕压力：`coverage += snake_push_per_segment * delta_entry * segment_pressure`。
 - 后段蛇身 `hp` 和 `segment_pressure` 更高，入场节奏也随进度和覆盖压力提升。
 - 击杀蛇身会减轻压力：`coverage -= snake_retreat_on_kill`。
 - 子弹穿门会消耗门成本：`gate.cost -= player.dps * dt`。
