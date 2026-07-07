@@ -464,19 +464,6 @@ const RENDERERS = {
     };
 
     ctx.save();
-    ctx.fillStyle = "rgba(17,35,49,.34)";
-    round(X(14), Y(14), X(362), Y(58), S(14)); ctx.fill();
-    ctx.strokeStyle = "rgba(221,238,247,.38)"; ctx.lineWidth = S(1.5); ctx.stroke();
-    textStroke("Snake Gate", X(28), Y(39), 18, "#eef8ff", "rgba(18,34,45,.75)", 900, 2);
-    textStroke(`击破 ${f.kills || 0}/${f.targetKills || 18}`, X(28), Y(61), 14, "#ffe96a", "rgba(18,34,45,.78)", 850, 2);
-    ctx.textAlign = "right";
-    textStroke(`待入场 ${f.pendingSegments ?? 0}`, X(360), Y(22), 12, "#cfe8f2", "rgba(18,34,45,.78)", 800, 2);
-    textStroke(`攻击 ${f.attack || 0}`, X(360), Y(38), 15, "#ffffff", "rgba(18,34,45,.78)", 850, 2);
-    textStroke(`攻速 ${f.fireRate || 0}`, X(360), Y(60), 15, "#ffffff", "rgba(18,34,45,.78)", 850, 2);
-    ctx.textAlign = "left";
-    ctx.restore();
-
-    ctx.save();
     for (let lane = 0; lane < 3; lane++) {
       const lx = laneX(lane);
       ctx.fillStyle = "rgba(236,247,250,.08)";
@@ -562,7 +549,12 @@ const RENDERERS = {
     ctx.restore();
 
     gates.forEach((g, i) => {
-      const title = (spec.gateTypes?.[g.type] || "攻击+").replace("攻击x", "攻击 × ").replace("攻速x", "攻速 × ");
+      let title;
+      const r = g.reward ?? 0;
+      if (g.type === 0) title = `攻击 +${r.toFixed(0)}`;
+      else if (g.type === 1) title = `攻击 × ${r.toFixed(2)}`;
+      else if (g.type === 2) title = `攻速 × ${r.toFixed(2)}`;
+      else title = (spec.gateTypes?.[g.type] || "攻击+");
       const gx = X((g.x || .5) * 390 - 42);
       const gy = Y((g.y || .62) * 693);
       drawGate(gx, gy, X(84), Y(38), title, g.cost, active === i);
@@ -610,6 +602,43 @@ const RENDERERS = {
     ctx.textAlign = "left";
     ctx.restore();
 
+    // 漂浮文字(伤害/升级/宝箱) — 用 age/maxAge 驱动渐进淡出
+    const floaters = f.floaters || [];
+    floaters.forEach(fl => {
+      const fx = X((fl.x || 0.5) * 390), fy = Y((fl.y || 0.5) * 693);
+      const sz = fl.size === "huge" ? S(22) : fl.size === "large" ? S(18) : S(14);
+      const age = fl.age ?? 0, maxAge = fl.maxAge ?? 1.5;
+      const alpha = clamp01(1.0 - age / maxAge);
+      if (alpha <= 0) return;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.textAlign = "center";
+      ctx.shadowColor = "rgba(0,0,0,.7)";
+      ctx.shadowBlur = S(6);
+      textStroke(fl.text, fx, fy - S(20) - (1 - alpha) * S(40), sz, fl.color || "#fff", "#111", 900, 3);
+      ctx.restore();
+    });
+
+    // 积分板 HUD — 放在最后绘制,保证在最上层
+    ctx.save();
+    const hudY = Y(4), hudH = Y(52);
+    const hudGrd = ctx.createLinearGradient(0, hudY, 0, hudY + hudH);
+    hudGrd.addColorStop(0, "rgba(10,22,31,.82)");
+    hudGrd.addColorStop(1, "rgba(10,22,31,.72)");
+    ctx.fillStyle = hudGrd;
+    round(X(8), hudY, X(374), hudH, S(10)); ctx.fill();
+    ctx.strokeStyle = "rgba(180,210,230,.22)"; ctx.lineWidth = S(1); ctx.stroke();
+
+    const pct = Math.min(100, Math.round(((f.kills || 0) / Math.max(1, f.targetKills || 100)) * 100));
+    const score = ((f.kills || 0) * 100 + (f.dps || 0) * 3 + (1 - (f.coverage || 0)) * 100);
+
+    textStroke(`🐍 击破 ${f.kills || 0}/${f.targetKills || 100} (${pct}%)`, X(18), hudY + S(16), 13, "#ffe96a", "rgba(10,22,31,.85)", 850, 2);
+    ctx.textAlign = "center";
+    textStroke(`积分 ${Math.round(score)}  ·  攻击 ${(f.attack || 0).toFixed(0)}  ·  攻速 ${(f.fireRate || 0).toFixed(0)}×`, X(195), hudY + S(34), 12, "#eef8ff", "rgba(10,22,31,.85)", 800, 2);
+    ctx.textAlign = "left";
+    ctx.restore();
+
+    // 事件闪光
     if (f.event === "snake_defeated" || f.event === "gate_upgraded" || f.event === "chest_opened") {
       ctx.save();
       const a = 0.2 + 0.12 * Math.sin(now * 7);

@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "rl-demo-server",
-      "runtimeExecutable": ".venv/bin/python",
+      "runtimeExecutable": "/opt/miniconda3/envs/强化学习/bin/python",
       "runtimeArgs": ["-m", "rl_lab.server", "--port", "8000"],
       "port": 8000
     }

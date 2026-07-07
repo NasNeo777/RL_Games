@@ -109,7 +109,7 @@ class LevelConfig:
     snake_track_straight_distance: float = 4.2
     snake_track_turn_distance: float = 0.9
     snake_track_turn_bulge: float = 0.045
-    target_kills: int = 18
+    target_kills: int = 111
     segment_hp: float = 95.0
     segment_hp_growth: float = 1.18
     chest_every: int = 4
@@ -164,6 +164,7 @@ class SnakeGateEnv(BaseEnv):
         self.cleared = 0
         self.last_bullets = []
         self.last_target_id = None
+        self.last_floaters = []
         self._sync_snake_entry_states()
         self.frames = []
         if self.record:
@@ -176,6 +177,11 @@ class SnakeGateEnv(BaseEnv):
         self.steps += 1
         self.last_bullets = []
         self.last_target_id = None
+
+        # age existing floaters, remove expired ones (> 1.5s)
+        for fl in self.last_floaters:
+            fl["age"] = fl.get("age", 0.0) + self.config.dt
+        self.last_floaters = [fl for fl in self.last_floaters if fl["age"] < fl.get("max_age", 1.5)]
 
         self._advance_snake_lifecycle()
         reward = -0.02 - 0.35 * self.coverage
@@ -543,10 +549,13 @@ class SnakeGateEnv(BaseEnv):
             gate is not None and hit_y is not None and hit_y > gate.config.y
         )
 
+        bullet_consumed = False
+
         if gate is not None and not gate_blocked:
             gate.remaining_cost -= damage
             event = "gate_hit"
             shaped += 0.1
+            bullet_consumed = True
             if gate.remaining_cost <= 0 and gate.unlocked:
                 before = self.player.dps
                 self._resolve_gate(gate)
@@ -556,11 +565,21 @@ class SnakeGateEnv(BaseEnv):
                 event = "gate_upgraded"
                 shaped += 18.0 + 0.02 * max(0.0, self.player.dps - before)
 
-        if target is not None:
+        if target is not None and not bullet_consumed:
             target.hp -= damage
             self.last_target_id = target.id
+            target_geo = self._segment_render_geometry(target)
+            self.last_floaters.append(
+                {"text": f"-{damage:.0f}", "x": target_geo["x"], "y": target_geo["y"],
+                 "color": "#ffe082", "size": "small"}
+            )
             if target.hp <= 0:
-                shaped += self._resolve_segment(target)
+                shred = self._resolve_segment(target)
+                shaped += shred
+                self.last_floaters.append(
+                    {"text": f"+{shred:.0f}💰", "x": target_geo["x"], "y": target_geo["y"],
+                     "color": "#ffd54f", "size": "large"}
+                )
                 event = "chest_opened" if target.chest else "segment_destroyed"
         else:
             event = "empty_lane" if gate is None else event
@@ -581,12 +600,26 @@ class SnakeGateEnv(BaseEnv):
 
     def _resolve_gate(self, gate: GateState) -> None:
         reward = gate.current_reward
+        before_attack = self.player.attack
+        before_fire_rate = self.player.fire_rate
         if gate.config.gate_type == GateType.ATTACK_ADD:
             self.player.attack += reward
+            self.last_floaters.append(
+                {"text": f"+{reward:.0f} 攻击", "x": gate.config.x, "y": gate.config.y,
+                 "color": "#ff9f4b", "size": "large"}
+            )
         elif gate.config.gate_type == GateType.ATTACK_MULT:
             self.player.attack *= reward
+            self.last_floaters.append(
+                {"text": f"x{reward:.2f} 攻击", "x": gate.config.x, "y": gate.config.y,
+                 "color": "#ff7043", "size": "large"}
+            )
         elif gate.config.gate_type == GateType.FIRE_RATE_MULT:
             self.player.fire_rate *= reward
+            self.last_floaters.append(
+                {"text": f"x{reward:.2f} 攻速", "x": gate.config.x, "y": gate.config.y,
+                 "color": "#4fc3f7", "size": "large"}
+            )
         gate.level += 1
         if gate.level >= gate.config.max_level:
             gate.unlocked = False
@@ -607,6 +640,13 @@ class SnakeGateEnv(BaseEnv):
             self.player.attack += 35.0 + self.kills * 4.5
             self.player.fire_rate *= 1.09
             reward += 70.0
+            geo = self._segment_render_geometry(segment)
+            atk_bonus = 35.0 + self.kills * 4.5
+            self.last_floaters.append(
+                {"text": f"宝箱 +{atk_bonus:.0f}攻击 x1.09速",
+                 "x": geo["x"], "y": geo["y"],
+                 "color": "#ce93d8", "size": "huge"}
+            )
         return reward
 
     def _target_segment(self, bullet_x: float):
@@ -756,6 +796,12 @@ class SnakeGateEnv(BaseEnv):
                     for g in self.gates
                 ],
                 "bullets": self.last_bullets,
+                "floaters": [
+                    {"text": fl["text"], "x": fl["x"], "y": fl["y"],
+                     "color": fl["color"], "size": fl["size"],
+                     "age": fl.get("age", 0.0), "maxAge": fl.get("max_age", 1.5)}
+                    for fl in self.last_floaters
+                ],
                 "event": event,
             }
         )
