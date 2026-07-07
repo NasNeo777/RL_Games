@@ -575,7 +575,7 @@ const RENDERERS = {
     ctx.beginPath(); ctx.arc(playerX - S(6), playerY - S(25), S(3), 0, Math.PI * 2); ctx.arc(playerX + S(6), playerY - S(25), S(3), 0, Math.PI * 2); ctx.fill();
     ctx.restore();
 
-    bullets.concat([{lane: activeLane, x: defaultBulletX}]).slice(-3).forEach((b, i) => {
+    (bullets.length > 0 ? bullets : [{lane: activeLane, x: defaultBulletX}]).slice(-3).forEach((b, i) => {
       const x = Number.isFinite(b.x) ? X(b.x * 390) : laneX(b.lane || 0);
       const pulse = (now * 4 + i * .28) % 1;
       const y0 = playerY - S(42);
