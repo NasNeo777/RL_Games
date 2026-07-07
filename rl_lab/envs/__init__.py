@@ -6,6 +6,7 @@ from .jump import JumpEnv, JumpPixelsEnv
 from .mario import MarioEnv
 from .mountain_car import MountainCarEnv
 from .snake import SnakeEnv
+from .snake_gate import SnakeGateEnv
 from .tetris import TetrisEnv
 
 ENVS = {
@@ -17,6 +18,7 @@ ENVS = {
     "mario": MarioEnv,
     "mountain_car": MountainCarEnv,
     "snake": SnakeEnv,
+    "snake_gate": SnakeGateEnv,
     "tetris": TetrisEnv,
 }
 

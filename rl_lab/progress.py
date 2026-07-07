@@ -35,6 +35,16 @@ BUDGETS = {
         "src": "估算",
         "rough": "2 分钟",
     },
+    "snake_gate_dqn": {
+        "steps": 80_000,
+        "src": "估算",
+        "rough": "几分钟",
+    },
+    "snake_gate_ppo": {
+        "steps": 120_000,
+        "src": "估算",
+        "rough": "几分钟",
+    },
     "2048_td2048": {
         "steps": 10_000_000,
         "src": "估算",

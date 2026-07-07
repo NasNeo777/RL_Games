@@ -311,6 +311,112 @@ const RENDERERS = {
     ctx.restore();
   },
 
+  snake_gate(ctx, W, H, spec, frames, fIdx, frac) {
+    const f = frames[fIdx] || frames[0];
+    if (!f) return;
+    const gates = f.gates || [], stones = f.obstacles || [], chests = f.chests || [];
+    const nG = gates.length, nS = stones.length, nC = chests.length;
+    const active = f.action;
+    ctx.clearRect(0, 0, W, H);
+
+    const clamp01 = v => Math.max(0, Math.min(1, v));
+    const ox = Math.max(16, (W - Math.min(W - 32, 840)) / 2);
+    const panelW = Math.min(W - 32, 840);
+    const top = 18, laneY = H * 0.54;
+    const bar = (x, y, w, h, ratio, color, label) => {
+      ctx.fillStyle = "#151d27";
+      ctx.beginPath(); ctx.roundRect(x, y, w, h, 7); ctx.fill();
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.roundRect(x, y, w * clamp01(ratio), h, 7); ctx.fill();
+      ctx.strokeStyle = "#31404f"; ctx.lineWidth = 1; ctx.strokeRect(x, y, w, h);
+      ctx.fillStyle = "#e6edf3"; ctx.font = "12px -apple-system, 'PingFang SC', sans-serif";
+      ctx.fillText(label, x + 8, y + h - 5);
+    };
+    const chip = (text, x, y, color = "#1f6feb") => {
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.roundRect(x, y, 92, 26, 8); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.font = "bold 12px -apple-system, 'PingFang SC', sans-serif";
+      ctx.fillText(text, x + 10, y + 17);
+    };
+
+    ctx.fillStyle = "#e6edf3";
+    ctx.font = "bold 18px -apple-system, 'PingFang SC', sans-serif";
+    ctx.fillText("大蛇关卡", ox, top + 4);
+    ctx.font = "12px -apple-system, 'PingFang SC', sans-serif";
+    ctx.fillStyle = "#8b98a5";
+    ctx.fillText(`t=${f.t}s · 事件 ${f.event || "running"}`, ox, top + 26);
+
+    chip(`攻击 ${f.attack}`, ox + 150, top - 8, "#1f6feb");
+    chip(`攻速 ${f.fireRate}`, ox + 250, top - 8, "#8957e5");
+    chip(`DPS ${f.dps}`, ox + 350, top - 8, "#238636");
+
+    bar(ox, top + 44, panelW * 0.48, 22,
+        f.baseHp / Math.max(1, f.baseMaxHp), "#2ea043",
+        `基地 ${f.baseHp}/${f.baseMaxHp}`);
+    bar(ox + panelW * 0.52, top + 44, panelW * 0.48, 22,
+        f.bossHp / Math.max(1, f.bossMaxHp), f.bossUnlocked ? "#f85149" : "#30363d",
+        f.bossUnlocked ? `大蛇 ${f.bossHp}/${f.bossMaxHp}` : "大蛇未出现");
+
+    // Upgrade gates.
+    gates.forEach((g, i) => {
+      const x = ox + i * 118, y = laneY - 122;
+      const hot = active === i;
+      ctx.fillStyle = hot ? "#388bfd" : (g.unlocked ? "#1f6feb" : "#30363d");
+      ctx.beginPath(); ctx.roundRect(x, y, 96, 94, 10); ctx.fill();
+      ctx.strokeStyle = hot ? "#f0f6fc" : "#31404f"; ctx.lineWidth = hot ? 2 : 1;
+      ctx.strokeRect(x, y, 96, 94);
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 13px -apple-system, 'PingFang SC', sans-serif";
+      const label = spec.gateTypes?.[g.type] || "门";
+      ctx.fillText(`${label} ${g.reward}`, x + 8, y + 21);
+      ctx.font = "12px -apple-system, 'PingFang SC', sans-serif";
+      ctx.fillText(`Lv ${g.level}/${g.maxLevel}`, x + 8, y + 45);
+      ctx.fillText(`成本 ${g.cost}`, x + 8, y + 65);
+      ctx.fillText(`ROI ${g.roi}`, x + 8, y + 84);
+    });
+
+    // Stones and chests form the route to the boss.
+    stones.forEach((o, i) => {
+      const actionIdx = nG + i;
+      const x = ox + i * 118, y = laneY + 18;
+      const hot = active === actionIdx;
+      ctx.fillStyle = o.cleared ? "#238636" : o.unlocked ? "#8b949e" : "#30363d";
+      ctx.beginPath(); ctx.roundRect(x, y, 96, 58, 9); ctx.fill();
+      ctx.strokeStyle = hot ? "#f0f6fc" : "#31404f"; ctx.lineWidth = hot ? 2 : 1;
+      ctx.strokeRect(x, y, 96, 58);
+      ctx.fillStyle = "#fff"; ctx.font = "bold 13px -apple-system, 'PingFang SC', sans-serif";
+      ctx.fillText(`石头 ${i + 1}`, x + 10, y + 22);
+      ctx.font = "12px -apple-system, 'PingFang SC', sans-serif";
+      ctx.fillText(o.cleared ? "已清除" : o.unlocked ? `${o.hp}/${o.maxHp}` : "未解锁",
+                   x + 10, y + 43);
+    });
+
+    chests.forEach((c, i) => {
+      const actionIdx = nG + nS + i;
+      const x = ox + panelW - 220 + i * 94, y = laneY + 20;
+      const hot = active === actionIdx;
+      ctx.fillStyle = c.opened ? "#238636" : c.unlocked ? "#d29922" : "#30363d";
+      ctx.beginPath(); ctx.roundRect(x, y, 76, 54, 8); ctx.fill();
+      ctx.strokeStyle = hot ? "#f0f6fc" : "#31404f"; ctx.lineWidth = hot ? 2 : 1;
+      ctx.strokeRect(x, y, 76, 54);
+      ctx.fillStyle = "#fff"; ctx.font = "bold 12px -apple-system, 'PingFang SC', sans-serif";
+      ctx.fillText(`宝箱 ${i + 1}`, x + 10, y + 22);
+      ctx.font = "12px -apple-system, 'PingFang SC', sans-serif";
+      ctx.fillText(c.opened ? "已开" : c.unlocked ? `${c.hp}` : "未解锁", x + 10, y + 42);
+    });
+
+    const bossAction = nG + nS + nC;
+    const bx = ox + panelW - 154, by = laneY - 124;
+    ctx.fillStyle = f.bossUnlocked ? (active === bossAction ? "#ff7b72" : "#da3633") : "#30363d";
+    ctx.beginPath(); ctx.roundRect(bx, by, 140, 92, 18); ctx.fill();
+    ctx.strokeStyle = active === bossAction ? "#f0f6fc" : "#31404f";
+    ctx.lineWidth = active === bossAction ? 2 : 1; ctx.strokeRect(bx, by, 140, 92);
+    ctx.fillStyle = "#fff"; ctx.font = "bold 18px -apple-system, 'PingFang SC', sans-serif";
+    ctx.fillText("大蛇", bx + 50, by + 35);
+    ctx.font = "12px -apple-system, 'PingFang SC', sans-serif";
+    ctx.fillText(f.bossUnlocked ? `${f.bossHp}/${f.bossMaxHp}` : "清完石头后出现", bx + 18, by + 62);
+  },
+
   "2048"(ctx, W, H, spec, frames, fIdx, frac) {
     const f = frames[fIdx];
     const g = spec.size;
@@ -935,6 +1041,8 @@ const BUDGETS = {
   flappy_bird_ppo:     { steps: 23_200_000,  src: "实测" },
   double_pendulum_ppo: { steps: 155_000_000, src: "实测" },
   snake_dqn:           { steps: 3_000_000,   src: "估算" },
+  snake_gate_dqn:      { steps: 80_000,      src: "估算" },
+  snake_gate_ppo:      { steps: 120_000,     src: "估算" },
   jump_dqn:            { steps: 4_000,       src: "实测" },
   "2048_td2048":       { steps: 10_000_000,  src: "估算" },
   "2048_dqn":  { tip: "⚠️ DQN 在 2048 上极慢(百万步仍千分级),强烈建议 --algo td2048,几分钟就能合出 2048" },

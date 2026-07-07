@@ -722,17 +722,19 @@ Step 5：接网页演示。
 
 ## 2.1 当前状态
 
-当前只整理了设计与实现框架，尚未真正新增 `rl_lab/envs/snake_gate.py`。
+当前已经落地第一版代码框架：`snake_gate` 环境可以被训练入口识别，也能给网页演示输出 `frames`。这一版重点是纯数值环境闭环，还不是完整游戏美术版。
 
 已有基础：
 
 | 已有内容 | 位置 | 说明 |
 | --- | --- | --- |
+| 大蛇关卡环境 | `rl_lab/envs/snake_gate.py` | 已实现 reset/step、奖励、录像帧、贪心 baseline |
 | 自制环境基类 | `rl_lab/envs/base.py` | 环境实现必须继承 `BaseEnv` |
-| 环境注册表 | `rl_lab/envs/__init__.py` | 新环境加到 `ENVS` 后训练入口才能识别 |
+| 环境注册表 | `rl_lab/envs/__init__.py` | 已注册 `"snake_gate": SnakeGateEnv` |
 | 训练入口 | `rl_lab/train.py` | 会创建 env、agent，写入 `runs/<env>_<algo>/` |
 | 演示服务 | `rl_lab/server.py` | 读取 checkpoint，开启 `env.record`，返回 frames |
-| 网页渲染 | `rl_lab/web/index.html` | 需要新增 `RENDERERS.snake_gate` |
+| 网页渲染 | `rl_lab/web/index.html` | 已新增 `RENDERERS.snake_gate` 和训练预算 |
+| 训练进度提示 | `rl_lab/progress.py` | 已新增 `snake_gate_dqn` / `snake_gate_ppo` 估算预算 |
 | Gymnasium 适配 | `rl_lab/envs/to_gym.py` | SB3 PPO 通过适配层使用自制环境 |
 
 重要约定：
@@ -750,20 +752,17 @@ BaseEnv.step(action) -> obs, reward, terminated, truncated, info
 
 ### 必做
 
-1. 新增 `rl_lab/envs/snake_gate.py`，按上面的骨架实现环境。
-2. 修改 `rl_lab/envs/__init__.py`，注册 `"snake_gate": SnakeGateEnv`。
-3. 写一个随机策略 smoke test，确认 1000 步内不会崩。
-4. 写一个贪心 baseline，确认简单数值能通关。
-5. 修改 `rl_lab/web/index.html`，增加 `snake_gate` 渲染器。
-6. 用 DQN 跑一轮短训，确认 `runs/snake_gate_dqn/metrics.jsonl`、`latest.pt` 能生成。
+1. 用 DQN 跑一轮短训，确认 `runs/snake_gate_dqn/metrics.jsonl`、`latest.pt` 能生成。
+2. 打开网页演示，确认 `snake_gate` 录像帧显示正常。
+3. 根据训练曲线调门成本、倍率、Boss 血量和奖励权重。
+4. 决定是否接入真正的 action mask 算法；当前 DQN/PPO 不会自动消费 `info["action_mask"]`。
 
 ### 可选
 
-1. 在 `rl_lab/progress.py` 和 `rl_lab/web/index.html` 的 `BUDGETS` 里增加 `snake_gate_dqn` 预算。
-2. 在 `README.md` 游戏厅里增加“大蛇关卡”的入口。
-3. 把关卡数值拆到 `snake_gate_config.py`，方便后续多难度。
-4. 把贪心策略拆到 `snake_gate_policy.py`，用于模仿学习或回归测试。
-5. 后续如果要真正使用 action mask，新增 Maskable PPO 或改造 agent 接口；当前 DQN/PPO 不会自动消费 `info["action_mask"]`。
+1. 在 `README.md` 游戏厅里增加“大蛇关卡”的入口。
+2. 把关卡数值拆到 `snake_gate_config.py`，方便后续多难度。
+3. 把贪心策略拆到 `snake_gate_policy.py`，用于模仿学习或回归测试。
+4. 增加简单回归测试，固定贪心策略应能通关。
 
 ---
 
