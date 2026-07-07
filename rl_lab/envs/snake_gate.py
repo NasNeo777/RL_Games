@@ -89,9 +89,9 @@ class LevelConfig:
     dt: float = 0.1
     time_limit: float = 120.0
     lanes: int = 3
-    player_attack: float = 12.0
+    player_attack: float = 45.0
     player_fire_rate: float = 1.0
-    snake_speed: float = 0.0065
+    snake_speed: float = 0.0045
     snake_push_per_segment: float = 0.024
     snake_retreat_on_kill: float = 0.035
     dead_clear_delay: float = 0.45

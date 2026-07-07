@@ -37,8 +37,8 @@ BUDGETS = {
     },
     "snake_gate_dqn": {
         "steps": 800_000,
-        "src": "估算(target_kills=111, 旧预算80k对应18杀, 线性增长+后期血量膨胀+门策略复杂度, 按6x复杂度缩放)",
-        "rough": "30-50 分钟",
+        "src": "估算(target_kills=111, γ=0.999, 含门策略+gate 升级+多路集火)",
+        "rough": "30-60 分钟",
     },
     "snake_gate_ppo": {
         "steps": 1_200_000,

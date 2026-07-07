@@ -37,7 +37,7 @@ class DQNAgent(BaseAgent):
     name = "dqn"
 
     def __init__(self, obs_dim, n_actions, device="cpu",
-                 lr=3e-4, gamma=0.99, buffer_size=100_000, batch_size=128,
+                 lr=3e-4, gamma=0.999, buffer_size=100_000, batch_size=128,
                  warmup=2_000, target_sync=1_000,
                  eps_start=1.0, eps_end=0.02, eps_decay_steps=150_000,
                  seed=None):
