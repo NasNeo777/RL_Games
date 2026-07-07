@@ -21,6 +21,7 @@
   .demo { flex: 1 1 340px; }
   .stats { flex: 1 1 280px; }
   canvas { display: block; width: 100%; border-radius: 8px; background: #0a0e12; }
+  canvas.snake-gate { width: 50%; }
   .obs-panel { margin-top: 12px; padding: 12px; border: 1px solid var(--border);
                border-radius: 8px; background: #141b22; display: none; }
   .obs-panel.show { display: block; }
@@ -536,7 +537,12 @@ const RENDERERS = {
       ctx.restore();
     }
 
-    const playerX = X(195), playerY = Y(574);
+    const activeLane = active >= 3 && active <= 5 ? active - 3 : (gates[active]?.lane ?? 1);
+    const defaultBulletX = gates[active]?.x ?? ((82 + activeLane * 112) / 390);
+    const currentBulletX = bullets.length > 0 && Number.isFinite(bullets[bullets.length - 1].x)
+      ? bullets[bullets.length - 1].x : defaultBulletX;
+    const currentBulletPixelX = Number.isFinite(currentBulletX) ? X(currentBulletX * 390) : laneX(activeLane);
+    const playerX = currentBulletPixelX, playerY = Y(574);
     ctx.save();
     const floor = ctx.createLinearGradient(0, Y(540), 0, H);
     floor.addColorStop(0, "rgba(19,49,63,.08)");
@@ -569,8 +575,6 @@ const RENDERERS = {
     ctx.beginPath(); ctx.arc(playerX - S(6), playerY - S(25), S(3), 0, Math.PI * 2); ctx.arc(playerX + S(6), playerY - S(25), S(3), 0, Math.PI * 2); ctx.fill();
     ctx.restore();
 
-    const activeLane = active >= 3 && active <= 5 ? active - 3 : (gates[active]?.lane ?? 1);
-    const defaultBulletX = gates[active]?.x ?? ((82 + activeLane * 112) / 390);
     bullets.concat([{lane: activeLane, x: defaultBulletX}]).slice(-3).forEach((b, i) => {
       const x = Number.isFinite(b.x) ? X(b.x * 390) : laneX(b.lane || 0);
       const pulse = (now * 4 + i * .28) % 1;
@@ -1258,6 +1262,8 @@ async function loadDemo(replay = false, auto = false) {
     const d = await r.json();
     if (d.error) { $("demoInfo").textContent = "⚠ " + d.error; return false; }
     state.demo = d; state.playT = 0;
+    const cv = $("stage");
+    cv.classList.toggle("snake-gate", d.spec.type === "snake_gate");
     state.lastVideoImg = null; state.lastObsImg = null;
     setObsPreview(d.spec, d.frames[0]);
     $("demoInfo").innerHTML =
