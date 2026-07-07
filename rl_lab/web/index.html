@@ -314,8 +314,8 @@ const RENDERERS = {
   snake_gate(ctx, W, H, spec, frames, fIdx, frac) {
     const f = frames[fIdx] || frames[0];
     if (!f) return;
-    const gates = f.gates || [], stones = f.obstacles || [], chests = f.chests || [];
-    const nG = gates.length, nS = stones.length, nC = chests.length;
+    const gates = f.gates || [], segments = f.snakeSegments || [], bullets = f.bullets || [];
+    const nG = gates.length;
     const active = f.action;
     const now = performance.now() / 1000;
     const clamp01 = v => Math.max(0, Math.min(1, v));
@@ -421,105 +421,144 @@ const RENDERERS = {
       textStroke(String(Math.round(value)), cx - S(16), cy + S(35), 23, "#fff", "#111", 900, 4);
     };
 
-    const navY = Y(68);
-    ctx.fillStyle = "rgba(0,0,0,.88)";
-    round(X(84), Y(14), X(222), Y(38), S(19)); ctx.fill();
-    textStroke("1:18", X(34), Y(38), 18, "#fff", "rgba(0,0,0,0)", 800, 0);
-    textStroke("5:27:46", X(266), Y(36), 16, "#fff", "rgba(0,0,0,0)", 800, 0);
-    ctx.fillStyle = "#ff8a38"; ctx.beginPath(); ctx.arc(X(104), Y(32), S(14), 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "#fff"; ctx.lineWidth = S(3); ctx.beginPath(); ctx.arc(X(104), Y(32), S(8), 0, Math.PI * 2); ctx.stroke();
-    textStroke("65", X(340), Y(36), 13, "#666", "rgba(0,0,0,0)", 900, 0);
-    ctx.fillStyle = "rgba(255,255,255,.9)"; round(X(335), Y(26), X(23), Y(12), S(6)); ctx.fill();
-    ctx.strokeStyle = "#fff"; ctx.lineWidth = S(3); ctx.beginPath(); ctx.moveTo(X(18), Y(75)); ctx.lineTo(X(32), Y(75)); ctx.moveTo(X(18), Y(86)); ctx.lineTo(X(32), Y(86)); ctx.moveTo(X(18), Y(97)); ctx.lineTo(X(32), Y(97)); ctx.stroke();
-    ctx.beginPath(); ctx.arc(X(362), Y(79), S(13), 0, Math.PI * 2); ctx.stroke(); ctx.beginPath(); ctx.moveTo(X(372), Y(90)); ctx.lineTo(X(383), Y(101)); ctx.stroke();
-    const tabs = ["播", "热点", "团购", "关注", "徐州", "商城", "推荐"];
-    tabs.forEach((t, i) => textStroke(t, X(52 + i * 44), navY, 17, i === 6 ? "#fff" : "rgba(255,255,255,.72)", "rgba(0,0,0,.08)", 850, 1));
-    ctx.fillStyle = "#ff2b5f"; ctx.beginPath(); ctx.arc(X(158), Y(72), S(4), 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "#fff"; ctx.lineWidth = S(2); ctx.beginPath(); ctx.moveTo(X(306), Y(86)); ctx.lineTo(X(329), Y(86)); ctx.stroke();
-
-    const topRows = [
-      [X(42), Y(65), X(85), Y(41), 76500], [X(108), Y(86), X(88), Y(47), 13500],
-      [X(210), Y(79), X(92), Y(45), 22500], [X(275), Y(76), X(88), Y(42), 45000],
-      [X(78), Y(141), X(83), Y(44), 450], [X(230), Y(144), X(92), Y(46), 2550],
-      [X(362), Y(141), X(86), Y(44), 300], [X(58), Y(218), X(88), Y(42), 750],
-      [X(330), Y(222), X(103), Y(44), 9999999]
-    ];
-    topRows.forEach((r, i) => drawRock(r[0], r[1], r[2], r[3], r[4], i < stones.length ? stones[i % stones.length].hp : null, active === nG + (i % Math.max(1, nS)), false));
-    chests.forEach((c, i) => drawChest(X(210 + i * 72), Y(210), c.opened, active === nG + nS + i, c.hp || 90));
-
-    gates.forEach((g, i) => {
-      const title = (spec.gateTypes?.[g.type] || "攻击+").replace("攻击x", "攻击 × ").replace("攻速x", "攻速 × ");
-      const coords = [[X(-18), Y(405)], [X(82), Y(474)], [X(235), Y(468)]][i] || [X(170 + i * 60), Y(385)];
-      drawGate(coords[0], coords[1], X(76), Y(35), title, g.cost, active === i);
-    });
-    drawGate(X(218), Y(334), X(116), Y(42), "攻击 +100", 50, active === 0, "#fff16b", "#ffb06a");
-    drawGate(X(314), Y(405), X(92), Y(35), "攻击 +50", 20, active === 1, "#ffd65d", "#ff945f");
-
-    const bossAction = nG + nS + nC;
-    if (f.bossUnlocked) {
-      const hpRatio = clamp01(f.bossHp / Math.max(1, f.bossMaxHp));
+    const laneX = lane => X(82 + lane * 112);
+    const drawSnakeSegment = seg => {
+      const cx = laneX(seg.lane || 0);
+      const cy = Y(105 + (seg.depth || 0) * 330 + (f.coverage || 0) * 165);
+      const hpRatio = clamp01((seg.hp || 0) / Math.max(1, seg.maxHp || 1));
+      const w = X(86 + 26 * (seg.depth || 0.1));
+      const h = Y(42 + 10 * (seg.depth || 0.1));
+      drawRock(cx, cy, w, h, Math.round(seg.hp || 0), null, seg.hit, hpRatio <= 0);
       ctx.save();
-      ctx.translate(X(330), Y(248));
-      ctx.rotate(Math.sin(now * 2) * 0.05);
-      ctx.strokeStyle = active === bossAction ? "#fff" : "#e7eef0";
-      ctx.lineWidth = S(10);
-      ctx.lineCap = "round";
-      ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(S(16), S(45), S(40), S(84)); ctx.stroke();
-      ctx.fillStyle = hpRatio > .35 ? "#eff5f3" : "#ffd1d1";
-      ctx.beginPath(); ctx.ellipse(0, 0, S(24), S(18), 0, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = "#121212"; ctx.lineWidth = S(2); ctx.stroke();
-      ctx.fillStyle = "#101010"; ctx.beginPath(); ctx.arc(-S(8), -S(3), S(3), 0, Math.PI * 2); ctx.arc(S(8), -S(3), S(3), 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(0,0,0,.36)";
+      round(cx - w * .38, cy + h * .33, w * .76, S(5), S(3)); ctx.fill();
+      const hp = ctx.createLinearGradient(cx - w * .38, 0, cx + w * .38, 0);
+      hp.addColorStop(0, "#ff304f"); hp.addColorStop(1, "#ffe65b");
+      ctx.fillStyle = hp;
+      round(cx - w * .38, cy + h * .33, w * .76 * hpRatio, S(5), S(3)); ctx.fill();
+      ctx.restore();
+      if (seg.chest) drawChest(cx + w * .22, cy - h * .24, false, seg.hit, seg.hp || 0);
+    };
+
+    ctx.save();
+    ctx.fillStyle = "rgba(17,35,49,.34)";
+    round(X(14), Y(14), X(362), Y(58), S(14)); ctx.fill();
+    ctx.strokeStyle = "rgba(221,238,247,.38)"; ctx.lineWidth = S(1.5); ctx.stroke();
+    textStroke("Snake Gate", X(28), Y(39), 18, "#eef8ff", "rgba(18,34,45,.75)", 900, 2);
+    textStroke(`击破 ${f.kills || 0}/${f.targetKills || 18}`, X(28), Y(61), 14, "#ffe96a", "rgba(18,34,45,.78)", 850, 2);
+    ctx.textAlign = "right";
+    textStroke(`攻击 ${f.attack || 0}`, X(360), Y(38), 15, "#ffffff", "rgba(18,34,45,.78)", 850, 2);
+    textStroke(`攻速 ${f.fireRate || 0}`, X(360), Y(60), 15, "#ffffff", "rgba(18,34,45,.78)", 850, 2);
+    ctx.textAlign = "left";
+    ctx.restore();
+
+    ctx.save();
+    for (let lane = 0; lane < 3; lane++) {
+      const lx = laneX(lane);
+      ctx.fillStyle = "rgba(236,247,250,.08)";
+      round(lx - X(34), Y(88), X(68), Y(468), S(34)); ctx.fill();
+      ctx.strokeStyle = "rgba(222,240,247,.15)"; ctx.lineWidth = S(1);
+      ctx.beginPath(); ctx.moveTo(lx, Y(88)); ctx.lineTo(lx, Y(548)); ctx.stroke();
+    }
+    ctx.restore();
+
+    const coverBottom = Y(92 + clamp01(f.coverage || 0) * 505);
+    const cover = ctx.createLinearGradient(0, Y(96), 0, coverBottom);
+    cover.addColorStop(0, "rgba(35,45,55,.35)");
+    cover.addColorStop(1, "rgba(20,30,38,.18)");
+    ctx.fillStyle = cover;
+    ctx.fillRect(0, Y(100), W, Math.max(0, coverBottom - Y(100)));
+
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.strokeStyle = "rgba(59,72,80,.68)";
+    ctx.lineWidth = S(42);
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(X(18), Y(112));
+    ctx.bezierCurveTo(X(92), Y(74), X(178), Y(150), X(255), Y(105));
+    ctx.bezierCurveTo(X(310), Y(74), X(358), Y(92), X(388), Y(116));
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(150,166,169,.78)";
+    ctx.lineWidth = S(30);
+    ctx.stroke();
+    ctx.restore();
+    segments.slice().sort((a, b) => (a.depth || 0) - (b.depth || 0)).forEach(drawSnakeSegment);
+
+    const danger = clamp01(((f.coverage || 0) - 0.62) / 0.26);
+    if (danger > 0) {
+      ctx.save();
+      ctx.globalAlpha = danger * (.16 + .08 * Math.sin(now * 9));
+      ctx.fillStyle = "#ff304f";
+      ctx.fillRect(0, 0, W, H);
       ctx.restore();
     }
 
-    const rightX = X(363);
-    const sideIcon = (y, kind, count) => {
-      ctx.save();
-      ctx.fillStyle = kind === "plus" ? "#ff2b5f" : "rgba(255,255,255,.92)";
-      if (kind === "avatar") {
-        ctx.fillStyle = "#ffd16a"; ctx.beginPath(); ctx.arc(rightX, Y(y), S(23), 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = "#111"; ctx.beginPath(); ctx.arc(rightX - S(7), Y(y), S(4), 0, Math.PI * 2); ctx.arc(rightX + S(7), Y(y), S(4), 0, Math.PI * 2); ctx.fill();
-      } else if (kind === "heart") {
-        ctx.font = font(34, 900); ctx.fillText("♥", rightX - S(17), Y(y + 8));
-      } else if (kind === "chat") {
-        ctx.beginPath(); ctx.ellipse(rightX, Y(y), S(19), S(14), 0, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = "#5f7890"; ctx.font = font(18, 900); ctx.fillText("•••", rightX - S(12), Y(y + 5));
-      } else if (kind === "star") {
-        ctx.font = font(34, 900); ctx.fillText("★", rightX - S(17), Y(y + 9));
-      } else if (kind === "share") {
-        ctx.font = font(34, 900); ctx.fillText("↗", rightX - S(16), Y(y + 9));
-      } else {
-        ctx.beginPath(); ctx.arc(rightX, Y(y), S(16), 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = "#fff"; ctx.lineWidth = S(4); ctx.beginPath(); ctx.moveTo(rightX - S(8), Y(y)); ctx.lineTo(rightX + S(8), Y(y)); ctx.moveTo(rightX, Y(y - 8)); ctx.lineTo(rightX, Y(y + 8)); ctx.stroke();
-      }
-      ctx.restore();
-      if (count) textStroke(count, rightX - S(12), Y(y + 38), 16, "#fff", "rgba(0,0,0,.2)", 800, 1);
-    };
-    sideIcon(382, "avatar"); sideIcon(418, "plus"); sideIcon(470, "heart", "5638");
-    sideIcon(535, "chat", "652"); sideIcon(600, "star", "985"); sideIcon(665, "share", "328"); sideIcon(735, "avatar");
+    const playerX = X(195), playerY = Y(574);
+    ctx.save();
+    const floor = ctx.createLinearGradient(0, Y(540), 0, H);
+    floor.addColorStop(0, "rgba(19,49,63,.08)");
+    floor.addColorStop(1, "rgba(13,29,39,.62)");
+    ctx.fillStyle = floor;
+    round(X(18), Y(538), X(354), Y(126), S(18)); ctx.fill();
+    ctx.strokeStyle = "rgba(232,246,250,.18)"; ctx.lineWidth = S(1.5); ctx.stroke();
+    ctx.fillStyle = "rgba(9,21,29,.34)";
+    round(playerX - S(62), Y(613), S(124), S(16), S(8)); ctx.fill();
+    ctx.restore();
 
-    ctx.fillStyle = "rgba(39,54,64,.78)";
-    round(X(12), Y(590), X(252), Y(96), S(10)); ctx.fill();
-    ctx.fillStyle = "#ff2b5f";
-    round(X(24), Y(646), X(228), Y(34), S(10)); ctx.fill();
-    textStroke("立即开玩", X(125), Y(670), 18, "#fff", "rgba(0,0,0,0)", 900, 0);
-    ctx.fillStyle = "#ffb14a"; round(X(12), Y(608), X(38), Y(38), S(5)); ctx.fill();
-    ctx.fillStyle = "#111"; ctx.beginPath(); ctx.arc(X(28), Y(626), S(5), 0, Math.PI * 2); ctx.arc(X(40), Y(626), S(5), 0, Math.PI * 2); ctx.fill();
-    textStroke("次神：光之觉醒", X(58), Y(634), 17, "#fff", "rgba(0,0,0,.2)", 800, 1);
-    textStroke("高自由度玩法，世界由你主宰！", X(70), Y(665), 14, "#fff", "rgba(0,0,0,.18)", 800, 1);
+    gates.forEach((g, i) => {
+      const title = (spec.gateTypes?.[g.type] || "攻击+").replace("攻击x", "攻击 × ").replace("攻速x", "攻速 × ");
+      const gx = X((g.x || .5) * 390 - 42);
+      const gy = Y((g.y || .62) * 693);
+      drawGate(gx, gy, X(84), Y(38), title, g.cost, active === i);
+    });
 
+    ctx.save();
+    ctx.fillStyle = "#18415f";
+    round(playerX - S(21), playerY - S(15), S(42), S(38), S(9)); ctx.fill();
+    ctx.fillStyle = "#ffb24a";
+    ctx.beginPath(); ctx.arc(playerX, playerY - S(24), S(17), 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = "#111";
-    ctx.fillRect(0, H - Y(76), W, Y(76));
-    textStroke("首页⌁", X(23), H - Y(39), 18, "#fff", "rgba(0,0,0,0)", 900, 0);
-    textStroke("⊞", X(179), H - Y(33), 36, "#fff", "rgba(0,0,0,0)", 700, 0);
-    textStroke("消息", X(257), H - Y(39), 18, "rgba(255,255,255,.55)", "rgba(0,0,0,0)", 900, 0);
-    textStroke("我", X(344), H - Y(39), 18, "rgba(255,255,255,.55)", "rgba(0,0,0,0)", 900, 0);
+    ctx.beginPath(); ctx.arc(playerX - S(6), playerY - S(25), S(3), 0, Math.PI * 2); ctx.arc(playerX + S(6), playerY - S(25), S(3), 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
 
-    if (f.event === "boss_defeated" || f.event === "gate_upgraded" || f.event === "chest_opened") {
+    const activeLane = active >= 3 && active <= 5 ? active - 3 : (gates[active]?.lane ?? 1);
+    bullets.concat([{lane: activeLane}]).slice(-3).forEach((b, i) => {
+      const x = laneX(b.lane || 0);
+      const pulse = (now * 4 + i * .28) % 1;
+      const y0 = playerY - S(42);
+      const y1 = Y(130 + (f.coverage || 0) * 210);
+      const by = y0 + (y1 - y0) * pulse;
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,245,120,.55)";
+      ctx.lineWidth = S(3);
+      ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, by); ctx.stroke();
+      ctx.fillStyle = "#fff86b";
+      ctx.shadowColor = "#fff86b"; ctx.shadowBlur = S(10);
+      ctx.beginPath(); ctx.arc(x, by, S(5), 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    });
+
+    ctx.save();
+    ctx.fillStyle = "rgba(12,30,42,.56)";
+    round(X(78), Y(632), X(234), Y(38), S(12)); ctx.fill();
+    ctx.strokeStyle = "rgba(232,246,250,.22)"; ctx.lineWidth = S(1.5); ctx.stroke();
+    ctx.textAlign = "center";
+    textStroke("选择属性门强化火力", X(195), Y(657), 16, "#eef8ff", "rgba(18,34,45,.78)", 850, 2);
+    ctx.textAlign = "left";
+    ctx.restore();
+
+    if (f.event === "snake_defeated" || f.event === "gate_upgraded" || f.event === "chest_opened") {
       ctx.save();
       const a = 0.2 + 0.12 * Math.sin(now * 7);
       ctx.fillStyle = `rgba(255,232,70,${a})`;
       ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    } else if (f.event === "screen_covered") {
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,.42)";
+      ctx.fillRect(0, 0, W, H);
+      textStroke("大蛇覆盖屏幕", X(84), Y(355), 26, "#ff304f", "#111", 900, 5);
       ctx.restore();
     }
   },

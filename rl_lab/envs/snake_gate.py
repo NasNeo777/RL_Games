@@ -1,14 +1,15 @@
-"""Snake Gate: numeric upgrade-gate combat environment.
+"""Snake Gate: vertical shooting gate-survival environment.
 
-The player deals continuous DPS to one selected target. Targets include
-upgrade gates, stones, chests, and the final snake boss. The environment keeps
-the action space fixed so DQN/PPO can train without dynamic network heads.
+The snake enters from the top and gradually covers the screen. The player fires
+from the bottom, routes bullets through fixed or moving upgrade gates, and has
+to destroy snake body segments one by one before the snake reaches the base.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import IntEnum
-from math import ceil
+from math import ceil, sin, tau
 
 import numpy as np
 
@@ -21,16 +22,9 @@ class GateType(IntEnum):
     FIRE_RATE_MULT = 2
 
 
-class TargetKind(IntEnum):
-    GATE = 0
-    OBSTACLE = 1
-    CHEST = 2
-    BOSS = 3
-
-
 @dataclass
 class PlayerState:
-    attack: float = 10.0
+    attack: float = 12.0
     fire_rate: float = 1.0
 
     @property
@@ -41,11 +35,17 @@ class PlayerState:
 @dataclass(frozen=True)
 class GateConfig:
     gate_type: GateType
+    lane: int
+    x: float
+    y: float
     base_cost: float
     cost_growth: float
     base_reward: float
     reward_growth: float
     max_level: int
+    moving: bool = False
+    amplitude: float = 0.0
+    speed: float = 0.0
 
 
 @dataclass
@@ -58,79 +58,79 @@ class GateState:
     unlocked: bool = True
 
     def refresh(self) -> None:
-        self.remaining_cost = self.config.base_cost * (
-            self.config.cost_growth ** self.level
+        self.remaining_cost = (
+            self.config.base_cost * self.config.cost_growth**self.level
         )
-        self.current_reward = self.config.base_reward * (
-            self.config.reward_growth ** self.level
+        self.current_reward = (
+            self.config.base_reward * self.config.reward_growth**self.level
         )
 
 
 @dataclass
-class ObstacleState:
-    id: str
+class SnakeSegment:
+    id: int
+    lane: int
+    row: int
+    path_x: float
+    path_y: float
     hp: float
     max_hp: float
-    unlocked: bool = True
-    cleared: bool = False
-    unlock_targets: list[str] = field(default_factory=list)
-
-
-@dataclass
-class ChestState:
-    id: str
-    hp: float
-    max_hp: float
-    unlocked: bool = False
-    opened: bool = False
-    attack_bonus: float = 0.0
-    fire_rate_mult: float = 1.0
-
-
-@dataclass
-class BossState:
-    hp: float
-    max_hp: float
-    attack_damage: float
-    attack_interval: float
-    timer: float = 0.0
-    unlocked: bool = False
+    depth: float
+    status: str = "pending"
+    status_age: float = 0.0
+    chest: bool = False
+    chest_opened: bool = False
 
 
 @dataclass(frozen=True)
 class LevelConfig:
     dt: float = 0.1
     time_limit: float = 120.0
-    base_hp: float = 1200.0
-    player_attack: float = 10.0
+    lanes: int = 3
+    player_attack: float = 12.0
     player_fire_rate: float = 1.0
-    gates: tuple[GateConfig, ...] = field(default_factory=lambda: (
-        GateConfig(GateType.ATTACK_ADD, 35.0, 1.75, 15.0, 1.32, 10),
-        GateConfig(GateType.ATTACK_MULT, 140.0, 2.35, 1.4, 1.04, 5),
-        GateConfig(GateType.FIRE_RATE_MULT, 90.0, 2.15, 1.3, 1.04, 5),
-    ))
-    obstacle_hps: tuple[float, ...] = (250.0, 700.0)
-    chest_hps: tuple[float, ...] = (420.0,)
-    boss_hp: float = 5000.0
-    boss_attack_damage: float = 14.0
-    boss_attack_interval: float = 1.0
+    snake_speed: float = 0.0065
+    snake_push_per_segment: float = 0.024
+    snake_retreat_on_kill: float = 0.035
+    dead_clear_delay: float = 0.45
+    fail_coverage: float = 0.88
+    start_coverage: float = 0.18
+    target_kills: int = 18
+    segment_hp: float = 95.0
+    segment_hp_growth: float = 1.18
+    chest_every: int = 4
+    gates: tuple[GateConfig, ...] = (
+        GateConfig(GateType.FIRE_RATE_MULT, 0, 0.22, 0.62, 48.0, 1.65, 1.35, 1.06, 6),
+        GateConfig(
+            GateType.ATTACK_ADD,
+            1,
+            0.50,
+            0.50,
+            42.0,
+            1.72,
+            24.0,
+            1.20,
+            8,
+            True,
+            0.18,
+            0.55,
+        ),
+        GateConfig(GateType.ATTACK_MULT, 2, 0.78, 0.66, 72.0, 1.88, 1.45, 1.05, 6),
+    )
 
 
 class SnakeGateEnv(BaseEnv):
-    """Upgrade gates + stones + boss, implemented as a pure numeric env."""
+    """Top-down snake pressure + upgrade-gate shooting game."""
 
     parallel_mode = "dummy"
+    obs_dim = 34
+    n_actions = 7
 
     def __init__(self, seed=None, config: LevelConfig | None = None):
         super().__init__()
         self.rng = np.random.default_rng(seed)
         self.config = config or LevelConfig()
         self.max_steps = int(ceil(self.config.time_limit / self.config.dt))
-        self.n_gates = len(self.config.gates)
-        self.n_obstacles = len(self.config.obstacle_hps)
-        self.n_chests = len(self.config.chest_hps)
-        self.n_actions = self.n_gates + self.n_obstacles + self.n_chests + 1
-        self.obs_dim = self._calc_obs_dim()
         self.reset(seed=seed)
 
     def reset(self, seed=None):
@@ -138,20 +138,20 @@ class SnakeGateEnv(BaseEnv):
             self.rng = np.random.default_rng(seed)
         self.t = 0.0
         self.steps = 0
-        self.base_hp = self.config.base_hp
+        self.coverage = self.config.start_coverage
         self.player = PlayerState(
-            attack=self.config.player_attack,
-            fire_rate=self.config.player_fire_rate,
+            self.config.player_attack, self.config.player_fire_rate
         )
         self.gates = self._make_gates()
-        self.obstacles = self._make_obstacles()
-        self.chests = self._make_chests()
-        self.boss = BossState(
-            hp=self.config.boss_hp,
-            max_hp=self.config.boss_hp,
-            attack_damage=self.config.boss_attack_damage,
-            attack_interval=self.config.boss_attack_interval,
-        )
+        self.snake_segments = self._make_snake_body()
+        self.next_entry_index = 0
+        self.entry_meter = 0.0
+        self.kills = 0
+        self.cleared = 0
+        self.last_bullets = []
+        self.last_target_id = None
+        for _ in range(min(self.config.lanes * 2, len(self.snake_segments))):
+            self._enter_next_segment()
         self.frames = []
         if self.record:
             self._record_frame(event="reset", action=None)
@@ -161,44 +161,42 @@ class SnakeGateEnv(BaseEnv):
         action = int(action)
         self.t += self.config.dt
         self.steps += 1
+        self.last_bullets = []
+        self.last_target_id = None
 
-        reward = -0.01
-        event = "idle"
-        invalid = not self._is_action_valid(action)
-        if invalid:
-            reward -= 1.0
-            event = "invalid_action"
-        else:
-            event, shaped = self._apply_player_damage(action)
-            reward += shaped
+        self._advance_snake_lifecycle()
+        reward = -0.02 - 0.35 * self.coverage
+        event, shaped = self._fire(action)
+        reward += shaped
 
-        base_damage = self._boss_tick()
-        reward -= 0.1 * base_damage
-
-        boss_dead = self.boss.hp <= 0
-        base_dead = self.base_hp <= 0
-        terminated = boss_dead or base_dead
+        success = self._snake_defeated()
+        failed = self.coverage >= self.config.fail_coverage
+        terminated = success or failed
         truncated = (not terminated) and self.steps >= self.max_steps
-
-        if boss_dead:
+        if success:
             reward += 1000.0
-            event = "boss_defeated"
-        elif base_dead:
+            event = "snake_defeated"
+        elif failed:
             reward -= 1000.0
-            event = "base_destroyed"
+            event = "screen_covered"
         elif truncated:
-            reward -= 300.0
+            reward -= 250.0
             event = "timeout"
 
         info = {
-            "success": boss_dead,
-            "score": int(max(0.0, self.config.boss_hp - self.boss.hp)),
+            "success": success,
+            "score": int(
+                self.kills * 100 + self.player.dps * 3 + (1 - self.coverage) * 100
+            ),
             "event": event,
             "attack": self.player.attack,
             "fire_rate": self.player.fire_rate,
             "dps": self.player.dps,
-            "base_hp": self.base_hp,
-            "boss_hp": max(0.0, self.boss.hp),
+            "coverage": self.coverage,
+            "kills": self.kills,
+            "cleared": self.cleared,
+            "pending": self._count_status("pending"),
+            "alive": self._active_segment_count(),
             "action_mask": self.action_mask(),
         }
         if self.record:
@@ -206,45 +204,17 @@ class SnakeGateEnv(BaseEnv):
         return self._obs(), float(reward), terminated, truncated, info
 
     def action_mask(self):
-        return [self._is_action_valid(a) for a in range(self.n_actions)]
+        return [True] * self.n_actions
 
     def greedy_action(self) -> int:
-        """Small deterministic baseline for tuning and smoke tests."""
-        boss_action = self.n_actions - 1
-
-        best_gate_action = None
-        best_roi = -1.0
+        best = max(range(3), key=lambda lane: self._lane_threat(lane))
         for i, gate in enumerate(self.gates):
-            if not self._is_action_valid(i):
-                continue
-            roi = self._gate_roi(gate)
-            if roi > best_roi:
-                best_roi = roi
-                best_gate_action = i
-
-        if best_gate_action is not None and best_roi >= 0.05:
-            return best_gate_action
-
-        if self.boss.unlocked:
-            return boss_action
-
-        first_chest_action = None
-        for action in range(self.n_actions):
-            if not self._is_action_valid(action):
-                continue
-            target = self._target_for_action(action)
-            if isinstance(target, ObstacleState):
-                return action
-            if isinstance(target, ChestState) and first_chest_action is None:
-                first_chest_action = action
-
-        if first_chest_action is not None:
-            return first_chest_action
-        if best_gate_action is not None:
-            return best_gate_action
-
-        mask = self.action_mask()
-        return next((i for i, ok in enumerate(mask) if ok), 0)
+            if gate.config.lane == best and self._gate_roi(gate) > 0.15:
+                return i
+        chest_lane = self._best_chest_lane()
+        if chest_lane is not None:
+            return 6
+        return 3 + best
 
     def _make_gates(self):
         gates = []
@@ -254,57 +224,140 @@ class SnakeGateEnv(BaseEnv):
             gates.append(gate)
         return gates
 
-    def _make_obstacles(self):
-        return [
-            ObstacleState(id=f"stone_{i}", hp=hp, max_hp=hp, unlocked=(i == 0))
-            for i, hp in enumerate(self.config.obstacle_hps)
-        ]
-
-    def _make_chests(self):
-        return [
-            ChestState(
-                id=f"chest_{i}",
-                hp=hp,
-                max_hp=hp,
-                attack_bonus=55.0 * (i + 1),
-                fire_rate_mult=1.05,
+    def _make_snake_body(self) -> list[SnakeSegment]:
+        body = []
+        total = self.config.target_kills
+        rows = max(1, ceil(total / self.config.lanes))
+        for idx in range(total):
+            row = idx // self.config.lanes
+            col = idx % self.config.lanes
+            lane = col if row % 2 == 0 else self.config.lanes - 1 - col
+            progress = idx / max(1, total - 1)
+            hp_scale = 1.0 + (self.config.segment_hp_growth - 1.0) * idx
+            hp_scale *= 1.0 + 0.28 * progress * progress
+            hp = self.config.segment_hp * hp_scale
+            chest = idx > 0 and idx % self.config.chest_every == 0
+            depth = 0.08 + 0.78 * (row / max(1, rows - 1))
+            path_x = (lane + 0.5) / self.config.lanes
+            path_y = (row + 0.5) / rows
+            body.append(
+                SnakeSegment(
+                    idx,
+                    lane,
+                    row,
+                    path_x,
+                    path_y,
+                    hp,
+                    hp,
+                    depth,
+                    "pending",
+                    0.0,
+                    chest,
+                )
             )
-            for i, hp in enumerate(self.config.chest_hps)
-        ]
+        return body
 
-    def _apply_player_damage(self, action):
+    def _enter_next_segment(self) -> bool:
+        if self.next_entry_index >= len(self.snake_segments):
+            return False
+        segment = self.snake_segments[self.next_entry_index]
+        segment.status = "entered"
+        segment.status_age = 0.0
+        self.next_entry_index += 1
+        self.coverage = min(
+            self.config.fail_coverage,
+            self.coverage
+            + self.config.snake_push_per_segment * self._segment_pressure(segment),
+        )
+        return True
+
+    def _advance_snake_lifecycle(self) -> None:
+        for segment in self.snake_segments:
+            if segment.status in {"entered", "alive", "dead"}:
+                segment.status_age += self.config.dt
+            if segment.status == "entered" and segment.status_age >= self.config.dt:
+                segment.status = "alive"
+                segment.status_age = 0.0
+            elif (
+                segment.status == "dead"
+                and segment.status_age >= self.config.dead_clear_delay
+            ):
+                segment.status = "cleared"
+                segment.status_age = 0.0
+                self.cleared += 1
+
+        active_pressure = sum(
+            self._segment_pressure(s)
+            for s in self.snake_segments
+            if s.status in {"entered", "alive"}
+        ) / max(1, self.config.target_kills)
+        self.coverage = min(
+            1.0,
+            self.coverage
+            + self.config.snake_speed * self.config.dt * (1.0 + 2.4 * active_pressure),
+        )
+
+        if self.next_entry_index < len(self.snake_segments):
+            progress = self.next_entry_index / max(1, len(self.snake_segments) - 1)
+            rate = 0.72 + 0.76 * progress + 0.36 * self.coverage
+            self.entry_meter += rate * self.config.dt
+            while self.entry_meter >= 1.0 and self._enter_next_segment():
+                self.entry_meter -= 1.0
+
+    def _segment_pressure(self, segment: SnakeSegment) -> float:
+        progress = segment.id / max(1, self.config.target_kills - 1)
+        return 1.0 + 0.8 * progress
+
+    def _count_status(self, status: str) -> int:
+        return sum(1 for s in self.snake_segments if s.status == status)
+
+    def _active_segment_count(self) -> int:
+        return sum(1 for s in self.snake_segments if s.status in {"entered", "alive"})
+
+    def _snake_defeated(self) -> bool:
+        return self.next_entry_index >= len(self.snake_segments) and all(
+            s.status in {"dead", "cleared"} for s in self.snake_segments
+        )
+
+    def _fire(self, action: int):
+        lane = self._lane_for_action(action)
         damage = self.player.dps * self.config.dt
-        target = self._target_for_action(action)
-        before_dps = self.player.dps
+        shaped = 0.05 * damage
+        event = "snake_hit"
+        gate = self.gates[action] if 0 <= action < len(self.gates) else None
 
-        if isinstance(target, GateState):
-            target.remaining_cost -= damage
-            if target.remaining_cost <= 0:
-                self._resolve_gate(target)
-                dps_gain = max(0.0, self.player.dps - before_dps)
-                return "gate_upgraded", 10.0 + 0.01 * dps_gain
-            return "gate_damaged", 0.0
+        if gate is not None:
+            gate.remaining_cost -= damage
+            event = "gate_hit"
+            shaped += 0.1
+            if gate.remaining_cost <= 0 and gate.unlocked:
+                before = self.player.dps
+                self._resolve_gate(gate)
+                damage *= 1.0 + min(
+                    2.0, max(0.0, self.player.dps - before) / max(1.0, before)
+                )
+                event = "gate_upgraded"
+                shaped += 18.0 + 0.02 * max(0.0, self.player.dps - before)
 
-        if isinstance(target, ObstacleState):
+        target = self._target_segment(lane, chest_priority=(action == 6))
+        if target is not None:
             target.hp -= damage
-            if target.hp <= 0 and not target.cleared:
-                self._resolve_obstacle(target)
-                return "obstacle_cleared", 20.0
-            return "obstacle_damaged", 0.0
+            self.last_target_id = target.id
+            if target.hp <= 0:
+                shaped += self._resolve_segment(target)
+                event = "chest_opened" if target.chest else "segment_destroyed"
+        else:
+            event = "empty_lane" if gate is None else event
+            shaped -= 0.4
 
-        if isinstance(target, ChestState):
-            target.hp -= damage
-            if target.hp <= 0 and not target.opened:
-                self._resolve_chest(target)
-                dps_gain = max(0.0, self.player.dps - before_dps)
-                return "chest_opened", 30.0 + 0.01 * dps_gain
-            return "chest_damaged", 0.0
-
-        if isinstance(target, BossState):
-            target.hp -= damage
-            return "boss_damaged", 0.001 * damage
-
-        return "unknown", 0.0
+        self.last_bullets.append(
+            {
+                "lane": lane,
+                "gate": gate.id if gate else None,
+                "target": self.last_target_id,
+            }
+        )
+        return event, shaped
 
     def _resolve_gate(self, gate: GateState) -> None:
         reward = gate.current_reward
@@ -314,7 +367,6 @@ class SnakeGateEnv(BaseEnv):
             self.player.attack *= reward
         elif gate.config.gate_type == GateType.FIRE_RATE_MULT:
             self.player.fire_rate *= reward
-
         gate.level += 1
         if gate.level >= gate.config.max_level:
             gate.unlocked = False
@@ -322,177 +374,186 @@ class SnakeGateEnv(BaseEnv):
         else:
             gate.refresh()
 
-    def _resolve_obstacle(self, obstacle: ObstacleState) -> None:
-        obstacle.cleared = True
-        obstacle.hp = 0.0
+    def _resolve_segment(self, segment: SnakeSegment) -> float:
+        self.kills += 1
+        segment.status = "dead"
+        segment.status_age = 0.0
+        segment.hp = 0.0
+        self.coverage = max(0.08, self.coverage - self.config.snake_retreat_on_kill)
+        progress_bonus = 1.0 + 0.45 * segment.id / max(1, self.config.target_kills - 1)
+        reward = 30.0 + 0.18 * segment.max_hp * progress_bonus
+        if segment.chest and not segment.chest_opened:
+            segment.chest_opened = True
+            self.player.attack += 35.0 + self.kills * 4.5
+            self.player.fire_rate *= 1.09
+            reward += 70.0
+        return reward
 
-        try:
-            idx = self.obstacles.index(obstacle)
-        except ValueError:
-            idx = -1
-        if 0 <= idx + 1 < len(self.obstacles):
-            self.obstacles[idx + 1].unlocked = True
-        if self.chests:
-            self.chests[0].unlocked = True
-        if all(o.cleared for o in self.obstacles):
-            self.boss.unlocked = True
+    def _target_segment(self, lane: int, chest_priority=False):
+        targetable = [
+            s for s in self.snake_segments if s.status in {"entered", "alive"}
+        ]
+        candidates = [s for s in targetable if s.lane == lane]
+        if not candidates:
+            candidates = list(targetable)
+        if not candidates:
+            return None
+        if chest_priority:
+            chests = [s for s in candidates if s.chest]
+            if chests:
+                return max(chests, key=lambda s: s.depth)
+        return max(candidates, key=lambda s: s.depth)
 
-    def _resolve_chest(self, chest: ChestState) -> None:
-        chest.opened = True
-        chest.hp = 0.0
-        self.player.attack += chest.attack_bonus
-        self.player.fire_rate *= chest.fire_rate_mult
+    def _lane_for_action(self, action: int) -> int:
+        if 0 <= action < len(self.gates):
+            return self.gates[action].config.lane
+        if 3 <= action <= 5:
+            return action - 3
+        return self._best_chest_lane() or int(
+            np.argmax([self._lane_threat(i) for i in range(3)])
+        )
 
-    def _boss_tick(self) -> float:
-        if not self.boss.unlocked:
+    def _best_chest_lane(self):
+        chests = [
+            s
+            for s in self.snake_segments
+            if s.chest and s.status in {"entered", "alive"}
+        ]
+        if not chests:
+            return None
+        return max(chests, key=lambda s: s.depth).lane
+
+    def _lane_threat(self, lane: int) -> float:
+        return sum(
+            (s.depth + 0.5) * (s.hp / max(1.0, s.max_hp))
+            for s in self.snake_segments
+            if s.lane == lane and s.status in {"entered", "alive"}
+        )
+
+    def _gate_x(self, gate: GateState) -> float:
+        cfg = gate.config
+        if not cfg.moving:
+            return cfg.x
+        return cfg.x + cfg.amplitude * sin(tau * cfg.speed * self.t)
+
+    def _gate_roi(self, gate: GateState) -> float:
+        if not gate.unlocked or gate.remaining_cost <= 0:
             return 0.0
-        self.boss.timer += self.config.dt
-        hits = int(self.boss.timer / self.boss.attack_interval)
-        if hits <= 0:
-            return 0.0
-        self.boss.timer -= hits * self.boss.attack_interval
-        damage = hits * self.boss.attack_damage
-        self.base_hp = max(0.0, self.base_hp - damage)
-        return damage
-
-    def _target_for_action(self, action):
-        if action < self.n_gates:
-            return self.gates[action]
-        action -= self.n_gates
-        if action < self.n_obstacles:
-            return self.obstacles[action]
-        action -= self.n_obstacles
-        if action < self.n_chests:
-            return self.chests[action]
-        return self.boss
-
-    def _is_action_valid(self, action) -> bool:
-        if action < 0 or action >= self.n_actions:
-            return False
-        target = self._target_for_action(action)
-        if isinstance(target, GateState):
-            return target.unlocked
-        if isinstance(target, ObstacleState):
-            return target.unlocked and not target.cleared
-        if isinstance(target, ChestState):
-            return target.unlocked and not target.opened
-        if isinstance(target, BossState):
-            return target.unlocked and target.hp > 0
-        return False
-
-    def _calc_obs_dim(self) -> int:
-        return 7 + self.n_gates * 6 + self.n_obstacles * 3 + self.n_chests * 3
+        before = self.player.dps
+        if gate.config.gate_type == GateType.ATTACK_ADD:
+            after = (self.player.attack + gate.current_reward) * self.player.fire_rate
+        elif gate.config.gate_type == GateType.ATTACK_MULT:
+            after = self.player.attack * gate.current_reward * self.player.fire_rate
+        else:
+            after = self.player.attack * self.player.fire_rate * gate.current_reward
+        return max(0.0, after - before) / gate.remaining_cost
 
     def _obs(self):
         values = [
             np.log1p(self.player.attack) / 10.0,
             np.log1p(self.player.fire_rate) / 5.0,
             np.log1p(self.player.dps) / 12.0,
+            self.coverage,
+            self.kills / max(1, self.config.target_kills),
             max(0.0, 1.0 - self.steps / self.max_steps),
-            self.base_hp / self.config.base_hp,
-            max(0.0, self.boss.hp) / self.boss.max_hp,
-            float(self.boss.unlocked),
+            self._active_segment_count() / 10.0,
         ]
-
         for gate in self.gates:
-            roi = self._gate_roi(gate)
-            values.extend([
-                float(gate.config.gate_type) / 2.0,
-                gate.level / max(1, gate.config.max_level),
-                np.log1p(max(0.0, gate.remaining_cost)) / 12.0,
-                np.log1p(max(0.0, gate.current_reward)) / 8.0,
-                np.clip(roi, 0.0, 10.0) / 10.0,
-                float(gate.unlocked),
-            ])
-
-        for obstacle in self.obstacles:
-            values.extend([
-                max(0.0, obstacle.hp) / obstacle.max_hp,
-                float(obstacle.unlocked),
-                float(obstacle.cleared),
-            ])
-
-        for chest in self.chests:
-            values.extend([
-                max(0.0, chest.hp) / chest.max_hp,
-                float(chest.unlocked),
-                float(chest.opened),
-            ])
-
+            values.extend(
+                [
+                    float(gate.config.gate_type) / 2.0,
+                    gate.level / max(1, gate.config.max_level),
+                    np.log1p(max(0.0, gate.remaining_cost)) / 12.0,
+                    np.log1p(max(0.0, gate.current_reward)) / 8.0,
+                    self._gate_roi(gate) / 10.0,
+                    self._gate_x(gate),
+                ]
+            )
+        for lane in range(3):
+            lane_segments = [
+                s
+                for s in self.snake_segments
+                if s.lane == lane and s.status in {"entered", "alive"}
+            ]
+            front = max((s.depth for s in lane_segments), default=0.0)
+            hp = sum(max(0.0, s.hp) / max(1.0, s.max_hp) for s in lane_segments)
+            chest = any(s.chest for s in lane_segments)
+            values.extend([front, min(1.0, hp / 4.0), float(chest)])
+        values = values[: self.obs_dim]
+        values.extend([0.0] * (self.obs_dim - len(values)))
         obs = np.array(values, dtype=np.float32)
         return np.nan_to_num(obs, nan=0.0, posinf=10.0, neginf=-10.0)
 
-    def _gate_roi(self, gate: GateState) -> float:
-        if not gate.unlocked or gate.remaining_cost <= 0:
-            return 0.0
-        old_dps = self.player.dps
-        if gate.config.gate_type == GateType.ATTACK_ADD:
-            new_dps = (self.player.attack + gate.current_reward) * self.player.fire_rate
-        elif gate.config.gate_type == GateType.ATTACK_MULT:
-            new_dps = (self.player.attack * gate.current_reward) * self.player.fire_rate
-        else:
-            new_dps = self.player.attack * (self.player.fire_rate * gate.current_reward)
-        return max(0.0, new_dps - old_dps) / gate.remaining_cost
-
     def _record_frame(self, event=None, action=None):
-        self.frames.append({
-            "t": round(self.t, 2),
-            "action": action,
-            "attack": round(self.player.attack, 2),
-            "fireRate": round(self.player.fire_rate, 2),
-            "dps": round(self.player.dps, 2),
-            "baseHp": round(self.base_hp, 2),
-            "baseMaxHp": self.config.base_hp,
-            "bossHp": round(max(0.0, self.boss.hp), 2),
-            "bossMaxHp": self.boss.max_hp,
-            "bossUnlocked": self.boss.unlocked,
-            "gates": [
-                {
-                    "id": g.id,
-                    "type": int(g.config.gate_type),
-                    "level": g.level,
-                    "maxLevel": g.config.max_level,
-                    "cost": round(max(0.0, g.remaining_cost), 2),
-                    "reward": round(g.current_reward, 2),
-                    "roi": round(self._gate_roi(g), 3),
-                    "unlocked": g.unlocked,
-                }
-                for g in self.gates
-            ],
-            "obstacles": [
-                {
-                    "id": o.id,
-                    "hp": round(max(0.0, o.hp), 2),
-                    "maxHp": o.max_hp,
-                    "unlocked": o.unlocked,
-                    "cleared": o.cleared,
-                }
-                for o in self.obstacles
-            ],
-            "chests": [
-                {
-                    "id": c.id,
-                    "hp": round(max(0.0, c.hp), 2),
-                    "maxHp": c.max_hp,
-                    "unlocked": c.unlocked,
-                    "opened": c.opened,
-                }
-                for c in self.chests
-            ],
-            "event": event,
-        })
+        self.frames.append(
+            {
+                "t": round(self.t, 2),
+                "action": action,
+                "attack": round(self.player.attack, 2),
+                "fireRate": round(self.player.fire_rate, 2),
+                "dps": round(self.player.dps, 2),
+                "coverage": round(self.coverage, 4),
+                "failCoverage": self.config.fail_coverage,
+                "kills": self.kills,
+                "targetKills": self.config.target_kills,
+                "pendingSegments": self._count_status("pending"),
+                "aliveSegments": self._active_segment_count(),
+                "clearedSegments": self.cleared,
+                "snakeSegments": [
+                    {
+                        "id": s.id,
+                        "lane": s.lane,
+                        "row": s.row,
+                        "pathX": round(s.path_x, 3),
+                        "pathY": round(s.path_y, 3),
+                        "hp": round(max(0.0, s.hp), 2),
+                        "maxHp": round(s.max_hp, 2),
+                        "depth": round(s.depth, 3),
+                        "status": s.status,
+                        "chest": s.chest,
+                        "chestOpened": s.chest_opened,
+                        "hit": self.last_target_id == s.id,
+                    }
+                    for s in self.snake_segments
+                    if s.status != "cleared"
+                ],
+                "gates": [
+                    {
+                        "id": g.id,
+                        "type": int(g.config.gate_type),
+                        "lane": g.config.lane,
+                        "x": round(self._gate_x(g), 3),
+                        "y": g.config.y,
+                        "moving": g.config.moving,
+                        "level": g.level,
+                        "maxLevel": g.config.max_level,
+                        "cost": round(max(0.0, g.remaining_cost), 2),
+                        "reward": round(g.current_reward, 2),
+                        "roi": round(self._gate_roi(g), 3),
+                        "unlocked": g.unlocked,
+                    }
+                    for g in self.gates
+                ],
+                "bullets": self.last_bullets,
+                "event": event,
+            }
+        )
 
     def render_spec(self):
         return {
             "type": "snake_gate",
             "frame_dt": self.config.dt,
-            "goal": "击败大蛇",
+            "goal": "阻止大蛇覆盖屏幕",
             "gateTypes": ["攻击+", "攻击x", "攻速x"],
+            "lanes": self.config.lanes,
             "actionLabels": [
-                *(f"门{i + 1}" for i in range(self.n_gates)),
-                *(f"石头{i + 1}" for i in range(self.n_obstacles)),
-                *(f"宝箱{i + 1}" for i in range(self.n_chests)),
-                "大蛇",
+                "左门",
+                "移动门",
+                "右门",
+                "左路",
+                "中路",
+                "右路",
+                "宝箱优先",
             ],
         }
 
