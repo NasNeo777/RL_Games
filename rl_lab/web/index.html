@@ -399,7 +399,7 @@ const RENDERERS = {
       ctx.restore();
       ctx.textAlign = "center";
       textStroke(title, x + w / 2, y - S(4), 21, "#ffe84e", "#111", 900, 4);
-      textStroke(`-${Math.max(1, Math.round(cost))}`, x + w / 2 - S(25), y + h * 0.67, 24, "#fff", "#111", 900, 4);
+      textStroke(`×${Math.max(1, Math.round(cost))}`, x + w / 2 - S(25), y + h * 0.67, 24, "#fff", "#111", 900, 4);
       ctx.textAlign = "left";
     };
 

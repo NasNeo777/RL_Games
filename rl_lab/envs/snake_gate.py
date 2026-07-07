@@ -126,7 +126,7 @@ class LevelConfig:
             1.20,
             8,
             True,
-            0.18,
+            0.30,
             0.55,
         ),
         GateConfig(GateType.ATTACK_MULT, 2, 0.78, 0.66, 72.0, 1.88, 1.45, 1.05, 6),
@@ -552,10 +552,11 @@ class SnakeGateEnv(BaseEnv):
         bullet_consumed = False
 
         if gate is not None and not gate_blocked:
-            gate.remaining_cost -= damage
+            gate.remaining_cost -= 1.0
             event = "gate_hit"
             shaped += 0.1
             bullet_consumed = True
+            hit_y = gate.config.y
             if gate.remaining_cost <= 0 and gate.unlocked:
                 before = self.player.dps
                 self._resolve_gate(gate)
@@ -788,7 +789,7 @@ class SnakeGateEnv(BaseEnv):
                         "moving": g.config.moving,
                         "level": g.level,
                         "maxLevel": g.config.max_level,
-                        "cost": round(max(0.0, g.remaining_cost), 2),
+                        "cost": round(max(0.0, g.remaining_cost)),
                         "reward": round(g.current_reward, 2),
                         "roi": round(self._gate_roi(g), 3),
                         "unlocked": g.unlocked,
