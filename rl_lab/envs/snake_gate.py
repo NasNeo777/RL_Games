@@ -114,22 +114,22 @@ class LevelConfig:
     segment_hp_growth: float = 1.18
     chest_every: int = 4
     gates: tuple[GateConfig, ...] = (
-        GateConfig(GateType.FIRE_RATE_MULT, 0, 0.22, 0.62, 48.0, 1.65, 1.35, 1.06, 6),
+        GateConfig(GateType.FIRE_RATE_MULT, 0, 0.22, 0.62, 20.0, 1.65, 5.0, 1.06, 6),
         GateConfig(
             GateType.ATTACK_ADD,
             1,
             0.50,
             0.50,
-            42.0,
+            50.0,
             1.72,
-            24.0,
+            100.0,
             1.20,
             8,
             True,
             0.30,
             0.55,
         ),
-        GateConfig(GateType.ATTACK_MULT, 2, 0.78, 0.66, 72.0, 1.88, 1.45, 1.05, 6),
+        GateConfig(GateType.ATTACK_ADD, 2, 0.78, 0.66, 50.0, 1.88, 100.0, 1.05, 6),
     )
 
 
