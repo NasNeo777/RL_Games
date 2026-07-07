@@ -285,13 +285,12 @@ class SnakeGateEnv(BaseEnv):
                 self.cleared += 1
 
         previous_entry = self.entry_meter
-        if self.entry_meter < self._tail_fully_entered_distance():
-            progress = self.entry_meter / max(1.0, len(self.snake_segments) - 1)
-            rate = 0.72 + 0.76 * progress + 0.36 * self.coverage
-            self.entry_meter = min(
-                self._tail_fully_entered_distance(),
-                self.entry_meter + rate * self.config.dt,
+        if self._body_segments():
+            progress = min(
+                1.0, self.entry_meter / max(1.0, len(self.snake_segments) - 1)
             )
+            rate = 0.72 + 0.76 * progress + 0.36 * self.coverage
+            self.entry_meter += rate * self.config.dt
             self._apply_continuous_entry_pressure(previous_entry, self.entry_meter)
 
         self._sync_snake_entry_states()
