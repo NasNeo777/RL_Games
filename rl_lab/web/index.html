@@ -19,9 +19,9 @@
   .panel { background: var(--panel); border: 1px solid var(--border);
            border-radius: 8px; padding: 10px; }
   .demo { flex: 1 1 340px; }
+  .demo.snake-gate { flex: 0 0 250px; }
   .stats { flex: 1 1 280px; }
   canvas { display: block; width: 100%; border-radius: 8px; background: #0a0e12; }
-  canvas.snake-gate { width: 50%; }
   .obs-panel { margin-top: 12px; padding: 12px; border: 1px solid var(--border);
                border-radius: 8px; background: #141b22; display: none; }
   .obs-panel.show { display: block; }
@@ -1164,6 +1164,7 @@ function animate(ts) {
       || cv.height !== Math.round(cssH * dpr)) {
     cv.width = Math.round(cssW * dpr);
     cv.height = Math.round(cssH * dpr);
+    cv.style.width = d.spec.type === "snake_gate" ? Math.round(cssW) + "px" : "100%";
     cv.style.height = cssH + "px";
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1262,8 +1263,8 @@ async function loadDemo(replay = false, auto = false) {
     const d = await r.json();
     if (d.error) { $("demoInfo").textContent = "⚠ " + d.error; return false; }
     state.demo = d; state.playT = 0;
-    const cv = $("stage");
-    cv.classList.toggle("snake-gate", d.spec.type === "snake_gate");
+    const demoPanel = document.querySelector(".demo");
+    demoPanel.classList.toggle("snake-gate", d.spec.type === "snake_gate");
     state.lastVideoImg = null; state.lastObsImg = null;
     setObsPreview(d.spec, d.frames[0]);
     $("demoInfo").innerHTML =
