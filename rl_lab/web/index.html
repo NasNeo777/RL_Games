@@ -317,104 +317,211 @@ const RENDERERS = {
     const gates = f.gates || [], stones = f.obstacles || [], chests = f.chests || [];
     const nG = gates.length, nS = stones.length, nC = chests.length;
     const active = f.action;
-    ctx.clearRect(0, 0, W, H);
-
+    const now = performance.now() / 1000;
     const clamp01 = v => Math.max(0, Math.min(1, v));
-    const ox = Math.max(16, (W - Math.min(W - 32, 840)) / 2);
-    const panelW = Math.min(W - 32, 840);
-    const top = 18, laneY = H * 0.54;
-    const bar = (x, y, w, h, ratio, color, label) => {
-      ctx.fillStyle = "#151d27";
-      ctx.beginPath(); ctx.roundRect(x, y, w, h, 7); ctx.fill();
-      ctx.fillStyle = color;
-      ctx.beginPath(); ctx.roundRect(x, y, w * clamp01(ratio), h, 7); ctx.fill();
-      ctx.strokeStyle = "#31404f"; ctx.lineWidth = 1; ctx.strokeRect(x, y, w, h);
-      ctx.fillStyle = "#e6edf3"; ctx.font = "12px -apple-system, 'PingFang SC', sans-serif";
-      ctx.fillText(label, x + 8, y + h - 5);
+    const sx = W / 390, sy = H / 693, s = Math.min(sx, sy);
+    const X = v => v * sx, Y = v => v * sy, S = v => v * s;
+    const font = (px, weight = 700) => `${weight} ${Math.round(S(px))}px -apple-system, "PingFang SC", sans-serif`;
+
+    ctx.clearRect(0, 0, W, H);
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+
+    const textStroke = (text, x, y, size, fill = "#fff", stroke = "#151515", weight = 800, width = 4) => {
+      ctx.font = font(size, weight);
+      ctx.lineJoin = "round";
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = S(width);
+      ctx.strokeText(text, x, y);
+      ctx.fillStyle = fill;
+      ctx.fillText(text, x, y);
     };
-    const chip = (text, x, y, color = "#1f6feb") => {
-      ctx.fillStyle = color;
-      ctx.beginPath(); ctx.roundRect(x, y, 92, 26, 8); ctx.fill();
-      ctx.fillStyle = "#fff"; ctx.font = "bold 12px -apple-system, 'PingFang SC', sans-serif";
-      ctx.fillText(text, x + 10, y + 17);
+    const round = (x, y, w, h, r) => { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); };
+
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, "#465c6d");
+    bg.addColorStop(0.45, "#6f9fbd");
+    bg.addColorStop(1, "#213342");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.globalAlpha = 0.22;
+    ctx.strokeStyle = "#173247";
+    ctx.lineWidth = S(2);
+    for (let i = 0; i < 8; i++) {
+      const x = X(30 + i * 58), y = Y(560 + Math.sin(i) * 22);
+      ctx.beginPath(); ctx.moveTo(x, H); ctx.quadraticCurveTo(x + S(18), y, x + S(2), y - S(64)); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + S(2), y - S(34)); ctx.lineTo(x - S(16), y - S(54)); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + S(2), y - S(44)); ctx.lineTo(x + S(17), y - S(66)); ctx.stroke();
+    }
+    ctx.restore();
+
+    const drawRock = (cx, cy, w, h, label, hp, hot, cleared) => {
+      ctx.save();
+      ctx.translate(cx, cy);
+      const r = S(10), hw = w / 2, hh = h / 2;
+      const grd = ctx.createLinearGradient(0, -hh, 0, hh);
+      grd.addColorStop(0, cleared ? "#d8e8d5" : "#efefef");
+      grd.addColorStop(1, cleared ? "#8eb789" : "#a9a9a9");
+      ctx.fillStyle = grd;
+      ctx.strokeStyle = hot ? "#ffffff" : "#1d1d1d";
+      ctx.lineWidth = hot ? S(4) : S(2);
+      ctx.shadowColor = hot ? "rgba(255,255,255,.95)" : "rgba(0,0,0,.45)";
+      ctx.shadowBlur = hot ? S(16) : S(5);
+      ctx.beginPath();
+      ctx.moveTo(-hw + r, -hh); ctx.lineTo(hw - r, -hh + S(4));
+      ctx.lineTo(hw, -S(4)); ctx.lineTo(hw - S(18), hh - S(2));
+      ctx.lineTo(-hw + S(20), hh); ctx.lineTo(-hw, S(8));
+      ctx.lineTo(-hw + S(6), -hh + S(12)); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = "rgba(40,40,40,.32)";
+      ctx.lineWidth = S(1.5);
+      ctx.beginPath(); ctx.moveTo(-S(18), -S(14)); ctx.lineTo(S(6), S(2)); ctx.lineTo(-S(5), S(17)); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(S(18), -S(18)); ctx.lineTo(S(28), S(8)); ctx.stroke();
+      ctx.restore();
+      textStroke(String(label), cx - S(36), cy + S(8), 26, "#f8f8f8", "#151515", 850, 4);
+      if (hp != null && !cleared) textStroke(String(Math.round(hp)), cx - S(20), cy + S(36), 20, "#ffffff", "#202020", 850, 3);
     };
 
-    ctx.fillStyle = "#e6edf3";
-    ctx.font = "bold 18px -apple-system, 'PingFang SC', sans-serif";
-    ctx.fillText("大蛇关卡", ox, top + 4);
-    ctx.font = "12px -apple-system, 'PingFang SC', sans-serif";
-    ctx.fillStyle = "#8b98a5";
-    ctx.fillText(`t=${f.t}s · 事件 ${f.event || "running"}`, ox, top + 26);
+    const drawGate = (x, y, w, h, title, cost, hot, colorA = "#fff05a", colorB = "#ff9f4b") => {
+      ctx.save();
+      if (hot) { ctx.shadowColor = "rgba(255,255,255,.9)"; ctx.shadowBlur = S(18); }
+      const grd = ctx.createLinearGradient(x, y, x + w, y + h);
+      grd.addColorStop(0, colorA); grd.addColorStop(0.62, "#ffe35a"); grd.addColorStop(1, colorB);
+      ctx.fillStyle = grd;
+      round(x, y, w, h, S(8)); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.25)";
+      round(x + S(5), y + S(5), w - S(10), h * 0.34, S(6)); ctx.fill();
+      ctx.strokeStyle = "#2a2a2a"; ctx.lineWidth = S(3);
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + h); ctx.moveTo(x + w, y); ctx.lineTo(x + w, y + h); ctx.stroke();
+      ctx.restore();
+      ctx.textAlign = "center";
+      textStroke(title, x + w / 2, y - S(4), 21, "#ffe84e", "#111", 900, 4);
+      textStroke(`-${Math.max(1, Math.round(cost))}`, x + w / 2 - S(25), y + h * 0.67, 24, "#fff", "#111", 900, 4);
+      ctx.textAlign = "left";
+    };
 
-    chip(`攻击 ${f.attack}`, ox + 150, top - 8, "#1f6feb");
-    chip(`攻速 ${f.fireRate}`, ox + 250, top - 8, "#8957e5");
-    chip(`DPS ${f.dps}`, ox + 350, top - 8, "#238636");
+    const drawChest = (cx, cy, opened, hot, value) => {
+      ctx.save();
+      ctx.translate(cx, cy);
+      if (hot) { ctx.shadowColor = "rgba(255,221,64,.9)"; ctx.shadowBlur = S(15); }
+      const grd = ctx.createLinearGradient(0, -S(20), 0, S(20));
+      grd.addColorStop(0, opened ? "#bde7aa" : "#ffd84b");
+      grd.addColorStop(1, opened ? "#5dbf6a" : "#d9861d");
+      ctx.fillStyle = grd;
+      round(-S(27), -S(17), S(54), S(34), S(8)); ctx.fill();
+      ctx.strokeStyle = "#5b330a"; ctx.lineWidth = S(3); ctx.stroke();
+      ctx.fillStyle = "#7b42e7";
+      ctx.fillRect(-S(8), -S(17), S(16), S(34));
+      ctx.fillStyle = "#f4b41b";
+      ctx.beginPath(); ctx.arc(0, 0, S(8), 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      textStroke(String(Math.round(value)), cx - S(16), cy + S(35), 23, "#fff", "#111", 900, 4);
+    };
 
-    bar(ox, top + 44, panelW * 0.48, 22,
-        f.baseHp / Math.max(1, f.baseMaxHp), "#2ea043",
-        `基地 ${f.baseHp}/${f.baseMaxHp}`);
-    bar(ox + panelW * 0.52, top + 44, panelW * 0.48, 22,
-        f.bossHp / Math.max(1, f.bossMaxHp), f.bossUnlocked ? "#f85149" : "#30363d",
-        f.bossUnlocked ? `大蛇 ${f.bossHp}/${f.bossMaxHp}` : "大蛇未出现");
+    const navY = Y(68);
+    ctx.fillStyle = "rgba(0,0,0,.88)";
+    round(X(84), Y(14), X(222), Y(38), S(19)); ctx.fill();
+    textStroke("1:18", X(34), Y(38), 18, "#fff", "rgba(0,0,0,0)", 800, 0);
+    textStroke("5:27:46", X(266), Y(36), 16, "#fff", "rgba(0,0,0,0)", 800, 0);
+    ctx.fillStyle = "#ff8a38"; ctx.beginPath(); ctx.arc(X(104), Y(32), S(14), 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = S(3); ctx.beginPath(); ctx.arc(X(104), Y(32), S(8), 0, Math.PI * 2); ctx.stroke();
+    textStroke("65", X(340), Y(36), 13, "#666", "rgba(0,0,0,0)", 900, 0);
+    ctx.fillStyle = "rgba(255,255,255,.9)"; round(X(335), Y(26), X(23), Y(12), S(6)); ctx.fill();
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = S(3); ctx.beginPath(); ctx.moveTo(X(18), Y(75)); ctx.lineTo(X(32), Y(75)); ctx.moveTo(X(18), Y(86)); ctx.lineTo(X(32), Y(86)); ctx.moveTo(X(18), Y(97)); ctx.lineTo(X(32), Y(97)); ctx.stroke();
+    ctx.beginPath(); ctx.arc(X(362), Y(79), S(13), 0, Math.PI * 2); ctx.stroke(); ctx.beginPath(); ctx.moveTo(X(372), Y(90)); ctx.lineTo(X(383), Y(101)); ctx.stroke();
+    const tabs = ["播", "热点", "团购", "关注", "徐州", "商城", "推荐"];
+    tabs.forEach((t, i) => textStroke(t, X(52 + i * 44), navY, 17, i === 6 ? "#fff" : "rgba(255,255,255,.72)", "rgba(0,0,0,.08)", 850, 1));
+    ctx.fillStyle = "#ff2b5f"; ctx.beginPath(); ctx.arc(X(158), Y(72), S(4), 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = S(2); ctx.beginPath(); ctx.moveTo(X(306), Y(86)); ctx.lineTo(X(329), Y(86)); ctx.stroke();
 
-    // Upgrade gates.
+    const topRows = [
+      [X(42), Y(65), X(85), Y(41), 76500], [X(108), Y(86), X(88), Y(47), 13500],
+      [X(210), Y(79), X(92), Y(45), 22500], [X(275), Y(76), X(88), Y(42), 45000],
+      [X(78), Y(141), X(83), Y(44), 450], [X(230), Y(144), X(92), Y(46), 2550],
+      [X(362), Y(141), X(86), Y(44), 300], [X(58), Y(218), X(88), Y(42), 750],
+      [X(330), Y(222), X(103), Y(44), 9999999]
+    ];
+    topRows.forEach((r, i) => drawRock(r[0], r[1], r[2], r[3], r[4], i < stones.length ? stones[i % stones.length].hp : null, active === nG + (i % Math.max(1, nS)), false));
+    chests.forEach((c, i) => drawChest(X(210 + i * 72), Y(210), c.opened, active === nG + nS + i, c.hp || 90));
+
     gates.forEach((g, i) => {
-      const x = ox + i * 118, y = laneY - 122;
-      const hot = active === i;
-      ctx.fillStyle = hot ? "#388bfd" : (g.unlocked ? "#1f6feb" : "#30363d");
-      ctx.beginPath(); ctx.roundRect(x, y, 96, 94, 10); ctx.fill();
-      ctx.strokeStyle = hot ? "#f0f6fc" : "#31404f"; ctx.lineWidth = hot ? 2 : 1;
-      ctx.strokeRect(x, y, 96, 94);
-      ctx.fillStyle = "#fff";
-      ctx.font = "bold 13px -apple-system, 'PingFang SC', sans-serif";
-      const label = spec.gateTypes?.[g.type] || "门";
-      ctx.fillText(`${label} ${g.reward}`, x + 8, y + 21);
-      ctx.font = "12px -apple-system, 'PingFang SC', sans-serif";
-      ctx.fillText(`Lv ${g.level}/${g.maxLevel}`, x + 8, y + 45);
-      ctx.fillText(`成本 ${g.cost}`, x + 8, y + 65);
-      ctx.fillText(`ROI ${g.roi}`, x + 8, y + 84);
+      const title = (spec.gateTypes?.[g.type] || "攻击+").replace("攻击x", "攻击 × ").replace("攻速x", "攻速 × ");
+      const coords = [[X(-18), Y(405)], [X(82), Y(474)], [X(235), Y(468)]][i] || [X(170 + i * 60), Y(385)];
+      drawGate(coords[0], coords[1], X(76), Y(35), title, g.cost, active === i);
     });
-
-    // Stones and chests form the route to the boss.
-    stones.forEach((o, i) => {
-      const actionIdx = nG + i;
-      const x = ox + i * 118, y = laneY + 18;
-      const hot = active === actionIdx;
-      ctx.fillStyle = o.cleared ? "#238636" : o.unlocked ? "#8b949e" : "#30363d";
-      ctx.beginPath(); ctx.roundRect(x, y, 96, 58, 9); ctx.fill();
-      ctx.strokeStyle = hot ? "#f0f6fc" : "#31404f"; ctx.lineWidth = hot ? 2 : 1;
-      ctx.strokeRect(x, y, 96, 58);
-      ctx.fillStyle = "#fff"; ctx.font = "bold 13px -apple-system, 'PingFang SC', sans-serif";
-      ctx.fillText(`石头 ${i + 1}`, x + 10, y + 22);
-      ctx.font = "12px -apple-system, 'PingFang SC', sans-serif";
-      ctx.fillText(o.cleared ? "已清除" : o.unlocked ? `${o.hp}/${o.maxHp}` : "未解锁",
-                   x + 10, y + 43);
-    });
-
-    chests.forEach((c, i) => {
-      const actionIdx = nG + nS + i;
-      const x = ox + panelW - 220 + i * 94, y = laneY + 20;
-      const hot = active === actionIdx;
-      ctx.fillStyle = c.opened ? "#238636" : c.unlocked ? "#d29922" : "#30363d";
-      ctx.beginPath(); ctx.roundRect(x, y, 76, 54, 8); ctx.fill();
-      ctx.strokeStyle = hot ? "#f0f6fc" : "#31404f"; ctx.lineWidth = hot ? 2 : 1;
-      ctx.strokeRect(x, y, 76, 54);
-      ctx.fillStyle = "#fff"; ctx.font = "bold 12px -apple-system, 'PingFang SC', sans-serif";
-      ctx.fillText(`宝箱 ${i + 1}`, x + 10, y + 22);
-      ctx.font = "12px -apple-system, 'PingFang SC', sans-serif";
-      ctx.fillText(c.opened ? "已开" : c.unlocked ? `${c.hp}` : "未解锁", x + 10, y + 42);
-    });
+    drawGate(X(218), Y(334), X(116), Y(42), "攻击 +100", 50, active === 0, "#fff16b", "#ffb06a");
+    drawGate(X(314), Y(405), X(92), Y(35), "攻击 +50", 20, active === 1, "#ffd65d", "#ff945f");
 
     const bossAction = nG + nS + nC;
-    const bx = ox + panelW - 154, by = laneY - 124;
-    ctx.fillStyle = f.bossUnlocked ? (active === bossAction ? "#ff7b72" : "#da3633") : "#30363d";
-    ctx.beginPath(); ctx.roundRect(bx, by, 140, 92, 18); ctx.fill();
-    ctx.strokeStyle = active === bossAction ? "#f0f6fc" : "#31404f";
-    ctx.lineWidth = active === bossAction ? 2 : 1; ctx.strokeRect(bx, by, 140, 92);
-    ctx.fillStyle = "#fff"; ctx.font = "bold 18px -apple-system, 'PingFang SC', sans-serif";
-    ctx.fillText("大蛇", bx + 50, by + 35);
-    ctx.font = "12px -apple-system, 'PingFang SC', sans-serif";
-    ctx.fillText(f.bossUnlocked ? `${f.bossHp}/${f.bossMaxHp}` : "清完石头后出现", bx + 18, by + 62);
+    if (f.bossUnlocked) {
+      const hpRatio = clamp01(f.bossHp / Math.max(1, f.bossMaxHp));
+      ctx.save();
+      ctx.translate(X(330), Y(248));
+      ctx.rotate(Math.sin(now * 2) * 0.05);
+      ctx.strokeStyle = active === bossAction ? "#fff" : "#e7eef0";
+      ctx.lineWidth = S(10);
+      ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(S(16), S(45), S(40), S(84)); ctx.stroke();
+      ctx.fillStyle = hpRatio > .35 ? "#eff5f3" : "#ffd1d1";
+      ctx.beginPath(); ctx.ellipse(0, 0, S(24), S(18), 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#121212"; ctx.lineWidth = S(2); ctx.stroke();
+      ctx.fillStyle = "#101010"; ctx.beginPath(); ctx.arc(-S(8), -S(3), S(3), 0, Math.PI * 2); ctx.arc(S(8), -S(3), S(3), 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+
+    const rightX = X(363);
+    const sideIcon = (y, kind, count) => {
+      ctx.save();
+      ctx.fillStyle = kind === "plus" ? "#ff2b5f" : "rgba(255,255,255,.92)";
+      if (kind === "avatar") {
+        ctx.fillStyle = "#ffd16a"; ctx.beginPath(); ctx.arc(rightX, Y(y), S(23), 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#111"; ctx.beginPath(); ctx.arc(rightX - S(7), Y(y), S(4), 0, Math.PI * 2); ctx.arc(rightX + S(7), Y(y), S(4), 0, Math.PI * 2); ctx.fill();
+      } else if (kind === "heart") {
+        ctx.font = font(34, 900); ctx.fillText("♥", rightX - S(17), Y(y + 8));
+      } else if (kind === "chat") {
+        ctx.beginPath(); ctx.ellipse(rightX, Y(y), S(19), S(14), 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#5f7890"; ctx.font = font(18, 900); ctx.fillText("•••", rightX - S(12), Y(y + 5));
+      } else if (kind === "star") {
+        ctx.font = font(34, 900); ctx.fillText("★", rightX - S(17), Y(y + 9));
+      } else if (kind === "share") {
+        ctx.font = font(34, 900); ctx.fillText("↗", rightX - S(16), Y(y + 9));
+      } else {
+        ctx.beginPath(); ctx.arc(rightX, Y(y), S(16), 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = S(4); ctx.beginPath(); ctx.moveTo(rightX - S(8), Y(y)); ctx.lineTo(rightX + S(8), Y(y)); ctx.moveTo(rightX, Y(y - 8)); ctx.lineTo(rightX, Y(y + 8)); ctx.stroke();
+      }
+      ctx.restore();
+      if (count) textStroke(count, rightX - S(12), Y(y + 38), 16, "#fff", "rgba(0,0,0,.2)", 800, 1);
+    };
+    sideIcon(382, "avatar"); sideIcon(418, "plus"); sideIcon(470, "heart", "5638");
+    sideIcon(535, "chat", "652"); sideIcon(600, "star", "985"); sideIcon(665, "share", "328"); sideIcon(735, "avatar");
+
+    ctx.fillStyle = "rgba(39,54,64,.78)";
+    round(X(12), Y(590), X(252), Y(96), S(10)); ctx.fill();
+    ctx.fillStyle = "#ff2b5f";
+    round(X(24), Y(646), X(228), Y(34), S(10)); ctx.fill();
+    textStroke("立即开玩", X(125), Y(670), 18, "#fff", "rgba(0,0,0,0)", 900, 0);
+    ctx.fillStyle = "#ffb14a"; round(X(12), Y(608), X(38), Y(38), S(5)); ctx.fill();
+    ctx.fillStyle = "#111"; ctx.beginPath(); ctx.arc(X(28), Y(626), S(5), 0, Math.PI * 2); ctx.arc(X(40), Y(626), S(5), 0, Math.PI * 2); ctx.fill();
+    textStroke("次神：光之觉醒", X(58), Y(634), 17, "#fff", "rgba(0,0,0,.2)", 800, 1);
+    textStroke("高自由度玩法，世界由你主宰！", X(70), Y(665), 14, "#fff", "rgba(0,0,0,.18)", 800, 1);
+
+    ctx.fillStyle = "#111";
+    ctx.fillRect(0, H - Y(76), W, Y(76));
+    textStroke("首页⌁", X(23), H - Y(39), 18, "#fff", "rgba(0,0,0,0)", 900, 0);
+    textStroke("⊞", X(179), H - Y(33), 36, "#fff", "rgba(0,0,0,0)", 700, 0);
+    textStroke("消息", X(257), H - Y(39), 18, "rgba(255,255,255,.55)", "rgba(0,0,0,0)", 900, 0);
+    textStroke("我", X(344), H - Y(39), 18, "rgba(255,255,255,.55)", "rgba(0,0,0,0)", 900, 0);
+
+    if (f.event === "boss_defeated" || f.event === "gate_upgraded" || f.event === "chest_opened") {
+      ctx.save();
+      const a = 0.2 + 0.12 * Math.sin(now * 7);
+      ctx.fillStyle = `rgba(255,232,70,${a})`;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
   },
 
   "2048"(ctx, W, H, spec, frames, fIdx, frac) {
@@ -915,7 +1022,10 @@ function animate(ts) {
   // 视网膜屏适配:画布物理分辨率 = CSS 尺寸 × devicePixelRatio,
   // 再用 transform 把坐标系缩回 CSS 尺寸,渲染器代码不用感知。
   const dpr = window.devicePixelRatio || 1;
-  const cssW = cv.clientWidth || 640, cssH = Math.round(cssW * 0.75);
+  const cssW = cv.clientWidth || 640;
+  const cssH = d.spec.type === "snake_gate"
+    ? Math.round(cssW * 16 / 9)
+    : Math.round(cssW * 0.75);
   if (cv.width !== Math.round(cssW * dpr)
       || cv.height !== Math.round(cssH * dpr)) {
     cv.width = Math.round(cssW * dpr);

@@ -645,6 +645,52 @@ snake_gate(ctx, W, H, spec, frames, fIdx, frac) {
 
 ---
 
+### 1.6.1 视觉设计规格（精美画面标准）
+
+为了满足“游戏要有精美画面”的需求，前端渲染器需实现以下视觉特性：
+
+#### A. 色彩与渐变体系
+- **背景**: 深邃的星空或流动的数字矩阵背景，使用 `createLinearGradient` 或 `createRadialGradient`。
+- **门 (Gates)**:
+    - 攻击+: 热力红渐变 (`#ff4444` -> `#ff8888`)。
+    - 攻速x: 闪电黄渐变 (`#ffcc00` -> `#ffee88`)。
+    - 攻击x: 皇家紫渐变 (`#9944ff` -> `#cc88ff`)。
+- **石头 (Obstacles)**: 坚固的岩石纹理，受损时闪烁红光。
+- **大蛇 (Boss)**: 邪恶的墨绿色或剧毒紫，伴随呼吸灯效果。
+
+#### B. 动态特效 (Particle Effects)
+- **升级特效**: 门升级时，向上喷发金色粒子流。
+- **受伤特效**: 目标受击时，产生短暂的白色爆发粒子和数值飘字。
+- **大蛇攻击**: 大蛇攻击时，基地方向出现红色的弹道轨迹。
+
+#### C. 动画效果
+- **进度条动画**: 血量和进度条应有平滑的过渡动画，而非瞬间跳变。
+- **UI 呼吸感**: 关键数值（如 DPS）在大幅提升时应有缩放呼吸动画。
+
+---
+
+### 1.6.2 Frame 数据扩展规格
+
+为了支持上述视觉效果，`snake_gate.py` 中的 `frames` 数据结构需扩展以下字段：
+
+```json
+{
+  "t": 0.1,
+  "action": 0,
+  "event": "boss_damaged",
+  "effects": [
+    {"type": "damage_number", "x": 100, "y": 200, "value": 50, "color": "#fff"},
+    {"type": "particle_burst", "target": "boss", "color": "#f85149"}
+  ],
+  "boss_phase": 1,
+  "screen_shake": 2.5
+}
+```
+
+> 注意：环境代码需在 `_record_frame` 中生成这些特效数据，前端根据数据驱动渲染，保持环境逻辑与表现分离。
+
+---
+
 ## 1.7 Observation / Action 约定
 
 ### Action
