@@ -109,7 +109,7 @@ class LevelConfig:
     snake_track_straight_distance: float = 4.2
     snake_track_turn_distance: float = 0.9
     snake_track_turn_bulge: float = 0.045
-    target_kills: int = 777
+    target_kills: int = 200
     segment_hp: float = 95.0
     segment_hp_growth: float = 1.18
     chest_every: int = 4
