@@ -59,10 +59,10 @@ class GateState:
 
     def refresh(self) -> None:
         self.remaining_cost = (
-            self.config.base_cost * self.config.cost_growth**self.level
+                self.config.base_cost * self.config.cost_growth ** self.level
         )
         self.current_reward = (
-            self.config.base_reward * self.config.reward_growth**self.level
+                self.config.base_reward * self.config.reward_growth ** self.level
         )
 
 
@@ -109,7 +109,7 @@ class LevelConfig:
     snake_track_straight_distance: float = 4.2
     snake_track_turn_distance: float = 0.9
     snake_track_turn_bulge: float = 0.045
-    target_kills: int = 111
+    target_kills: int = 777
     segment_hp: float = 95.0
     segment_hp_growth: float = 1.18
     chest_every: int = 4
@@ -283,8 +283,8 @@ class SnakeGateEnv(BaseEnv):
             if segment.status == "dead":
                 segment.status_age += self.config.dt
             if (
-                segment.status == "dead"
-                and segment.status_age >= self.config.dead_clear_delay
+                    segment.status == "dead"
+                    and segment.status_age >= self.config.dead_clear_delay
             ):
                 segment.status = "cleared"
                 segment.status_age = 0.0
@@ -406,9 +406,9 @@ class SnakeGateEnv(BaseEnv):
         left = self.config.snake_track_left
         right = self.config.snake_track_right
         row_y = (
-            self.config.entry_start_y
-            + self.coverage * 0.12
-            + row * self.config.snake_track_row_gap
+                self.config.entry_start_y
+                + self.coverage * 0.12
+                + row * self.config.snake_track_row_gap
         )
 
         left_to_right = row % 2 == 0
@@ -491,7 +491,7 @@ class SnakeGateEnv(BaseEnv):
         return (lane + 0.5) / max(1, self.config.lanes)
 
     def _bullet_path_for_action(
-        self, action: int, lane: int, gate: GateState | None
+            self, action: int, lane: int, gate: GateState | None
     ) -> tuple[float, float]:
         if action == 6:
             chest = self._best_chest_segment()
@@ -502,7 +502,7 @@ class SnakeGateEnv(BaseEnv):
         return self._lane_screen_x(lane), self.config.bullet_end_y
 
     def _first_colliding_segment(
-        self, bullet_x: float
+            self, bullet_x: float
     ) -> tuple[SnakeSegment | None, float | None]:
         best: tuple[float, SnakeSegment] | None = None
         start_y = self.config.bullet_start_y
@@ -550,7 +550,7 @@ class SnakeGateEnv(BaseEnv):
         if gate is None:
             gate = self._gate_in_path(bullet_x)
         gate_blocked = (
-            gate is not None and hit_y is not None and hit_y > gate.config.y
+                gate is not None and hit_y is not None and hit_y > gate.config.y
         )
 
         bullet_consumed = False
